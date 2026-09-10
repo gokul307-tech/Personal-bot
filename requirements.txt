@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+openai
+python-dotenv
+sqlalchemy
+pydantic
+pydantic-settings
+pypdf
+pandas
+numpy
+matplotlib
+sentence-transformers
+requests
+beautifulsoup4
+pytest
+httpx

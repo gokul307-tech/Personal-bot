@@ -1,0 +1,40 @@
+# Virtual environment
+.venv/
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Testing
+.pytest_cache/
+.coverage
+
+# IDE
+.vscode/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Application data
+data/uploads/*
+data/vector_store/*
+data/exports/*
+data/documents/*
+
+# Keep directory placeholders
+!data/uploads/.gitkeep
+!data/vector_store/.gitkeep
+!data/exports/.gitkeep
+!data/documents/.gitkeep
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

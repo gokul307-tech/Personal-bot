@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#598556">
+  <title>SAGE | Your AI Study Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><div class="brand-mark">S</div><div><strong>SAGE</strong><span>Your AI Study Assistant</span></div></div>
+      <button class="new-chat" id="new-chat"><span>+</span> New Chat</button>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button class="nav-item active" data-view="chat"><span>⌂</span> Explore</button>
+        <button class="nav-item" data-view="templates"><span>▧</span> Templates</button>
+        <button class="nav-item" data-view="notes"><span>▤</span> Notes</button>
+        <button class="nav-item" data-view="study"><span>◫</span> Study Plan</button>
+        <button class="nav-item" data-view="uploads"><span>↥</span> Uploads</button>
+        <button class="nav-item" data-view="memory"><span>✦</span> Memory</button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <button class="nav-item" id="theme-toggle"><span>◐</span> <span id="theme-label">Dark mode</span></button>
+      <button class="nav-item" data-view="settings"><span>⚙</span> Settings</button>
+      <div class="profile"><div class="avatar">S</div><div><strong>Student</strong><span>Free Plan</span></div><span class="profile-dot"></span></div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar"><button class="icon-btn mobile-only" id="sidebar-toggle" aria-label="Open navigation">☰</button><div class="mobile-brand">SAGE</div><div class="top-actions"><button class="text-btn" id="share-btn">↗ Share</button><button class="icon-btn" id="bookmark-btn" aria-label="Bookmark conversation">♡</button><button class="icon-btn" id="more-btn" aria-label="More actions">•••</button></div></header>
+      <section class="chat-view" id="chat-view">
+        <div class="conversation-head"><div><p class="eyebrow">STUDY SESSION</p><h1 id="conversation-title">New Chat</h1></div><span class="online"><i></i> SAGE is ready</span></div>
+        <div class="messages" id="messages"></div>
+        <div class="welcome" id="welcome"><div class="welcome-mark">S</div><h2>How can I help you study today?</h2><p>Ask SAGE to explain, plan, calculate, quiz, or organize your learning.</p><div class="suggestions"><button data-prompt="Explain a concept with an example">Explain a concept</button><button data-prompt="Create a 7 day study plan">Create a study plan</button><button data-prompt="Generate a quiz for me">Generate a quiz</button><button data-prompt="Help me analyze my notes">Analyze my notes</button></div></div>
+        <div class="composer-wrap"><div class="tool-row"><button data-tool="Brainstorm">✧ Brainstorm</button><button data-tool="Web search">⌕ Web search</button><button data-tool="Code help">&lt;/&gt; Code</button><button data-tool="More tools">••• More</button></div><form class="composer" id="composer"><button type="button" class="icon-btn" id="attach-btn" aria-label="Attach a file">＋</button><textarea id="message-input" rows="1" placeholder="Ask me anything..." aria-label="Message SAGE"></textarea><button type="button" class="icon-btn" id="mic-btn" aria-label="Use microphone">♩</button><button class="send-btn" type="submit" aria-label="Send message">↑</button></form><input type="file" id="file-input" hidden><p class="composer-note">Enter to send · Shift + Enter for a new line</p></div>
+      </section>
+      <section class="placeholder-view" id="placeholder-view" hidden><div class="placeholder-icon">✦</div><p class="eyebrow" id="placeholder-eyebrow">SAGE WORKSPACE</p><h2 id="placeholder-title">Coming into focus</h2><p id="placeholder-copy">This workspace is ready for your study flow. Chat with SAGE to get started.</p><button class="new-chat" id="placeholder-chat">Start a chat</button></section>
+    </main>
+
+    <aside class="history-panel"><div class="history-head"><div><p class="eyebrow">YOUR SPACE</p><h2>History</h2></div><button class="icon-btn" id="delete-history" aria-label="Delete all history">⌫</button></div><div class="history-list" id="history-list"></div><div class="history-footer"><span id="history-count">0 conversations</span><button id="clear-history">Delete history</button></div></aside>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
