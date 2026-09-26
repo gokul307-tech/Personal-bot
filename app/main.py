@@ -30,6 +30,12 @@ def create_app() -> FastAPI:
         prefix="/api",
     )
 
+    application.mount(
+        "/assets",
+        StaticFiles(directory=BASE_DIR / "frontend" / "public" / "assets"),
+        name="assets",
+    )
+
     application.mount("/", StaticFiles(directory=BASE_DIR / "frontend", html=True), name="frontend")
 
     return application
