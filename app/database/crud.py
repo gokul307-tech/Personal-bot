@@ -68,6 +68,38 @@ def delete_all_conversations(db: Session, user_id: int = 1):
     return len(ids)
 
 
+def get_note(db: Session, note_id: int, user_id: int = 1):
+    query = select(Note).where(Note.id == note_id)
+    if user_id is not None:
+        query = query.where(Note.user_id == user_id)
+    return db.execute(query).scalar_one_or_none()
+
+
+def delete_note(db: Session, note_id: int, user_id: int = 1) -> bool:
+    note = get_note(db, note_id, user_id)
+    if note is None:
+        return False
+    db.delete(note)
+    db.commit()
+    return True
+
+
+def get_memory(db: Session, memory_id: int, user_id: int = 1):
+    query = select(Memory).where(Memory.id == memory_id)
+    if user_id is not None:
+        query = query.where(Memory.user_id == user_id)
+    return db.execute(query).scalar_one_or_none()
+
+
+def delete_memory(db: Session, memory_id: int, user_id: int = 1) -> bool:
+    memory = get_memory(db, memory_id, user_id)
+    if memory is None:
+        return False
+    db.delete(memory)
+    db.commit()
+    return True
+
+
 # =========================================================
 # NOTES
 # =========================================================
