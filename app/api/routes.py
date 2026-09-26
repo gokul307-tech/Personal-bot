@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.api.dependencies import get_agent
 from app.api.schemas import (
@@ -7,11 +10,18 @@ from app.api.schemas import (
     HealthResponse,
     ConversationCreate,
     ConversationRename,
+    MemoryCreate,
+    NoteCreate,
+    NoteUpdate,
+    StudyPlanCreate,
 )
 from app.config.settings import APP_NAME
 from app.database.database import get_db
 from app.database import crud
 from app.agent.agent import VDSSAgent
+from app.config.settings import DOCUMENTS_DIR
+from app.database.models import StudyPlan
+from app.tools.rag import ingest_document
 
 
 router = APIRouter()
@@ -135,3 +145,147 @@ def remove_all_conversations():
         return {"deleted": crud.delete_all_conversations(db, USER_ID)}
     finally:
         db.close()
+
+
+@router.get("/notes")
+def list_notes():
+    db = next(get_db())
+    try:
+        return [
+            {
+                "id": note.id,
+                "title": note.title,
+                "content": note.content,
+                "subject": note.subject,
+                "created_at": note.created_at,
+            }
+            for note in crud.get_notes(db, user_id=USER_ID)
+        ]
+    finally:
+        db.close()
+
+
+@router.post("/notes")
+def create_note(request: NoteCreate):
+    db = next(get_db())
+    try:
+        note = crud.create_note(db, request.title, request.content, request.subject, USER_ID)
+        return {"id": note.id, "title": note.title, "content": note.content, "subject": note.subject, "created_at": note.created_at}
+    finally:
+        db.close()
+
+
+@router.patch("/notes/{note_id}")
+def update_note(note_id: int, request: NoteUpdate):
+    db = next(get_db())
+    try:
+        note = crud.get_note(db, note_id, USER_ID)
+        if note is None:
+            raise HTTPException(status_code=404, detail="Note not found")
+        for field, value in request.model_dump(exclude_unset=True).items():
+            setattr(note, field, value)
+        db.commit()
+        db.refresh(note)
+        return {"id": note.id, "title": note.title, "content": note.content, "subject": note.subject}
+    finally:
+        db.close()
+
+
+@router.delete("/notes/{note_id}")
+def remove_note(note_id: int):
+    db = next(get_db())
+    try:
+        if not crud.delete_note(db, note_id, USER_ID):
+            raise HTTPException(status_code=404, detail="Note not found")
+        return {"deleted": True}
+    finally:
+        db.close()
+
+
+@router.get("/study-plans")
+def list_study_plans():
+    db = next(get_db())
+    try:
+        return [
+            {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed}
+            for plan in crud.get_study_plans(db, USER_ID)
+        ]
+    finally:
+        db.close()
+
+
+@router.post("/study-plans")
+def create_study_plan(request: StudyPlanCreate):
+    db = next(get_db())
+    try:
+        scheduled_at = datetime.fromisoformat(request.scheduled_at) if request.scheduled_at else None
+        plan = crud.create_study_plan(db, request.title, request.subject, request.description, scheduled_at, USER_ID)
+        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="scheduled_at must be an ISO datetime") from exc
+    finally:
+        db.close()
+
+
+@router.patch("/study-plans/{plan_id}")
+def update_study_plan(plan_id: int, completed: bool):
+    db = next(get_db())
+    try:
+        plan = db.get(StudyPlan, plan_id)
+        if plan is None or plan.user_id != USER_ID:
+            raise HTTPException(status_code=404, detail="Study plan not found")
+        plan.completed = completed
+        db.commit()
+        return {"id": plan.id, "completed": plan.completed}
+    finally:
+        db.close()
+
+
+@router.get("/memories")
+def list_memories():
+    db = next(get_db())
+    try:
+        return [{"id": item.id, "content": item.content, "memory_type": item.memory_type, "importance": item.importance, "created_at": item.created_at} for item in crud.get_memories(db, user_id=USER_ID)]
+    finally:
+        db.close()
+
+
+@router.post("/memories")
+def create_memory(request: MemoryCreate):
+    db = next(get_db())
+    try:
+        item = crud.create_memory(db, request.content, request.memory_type, request.importance, USER_ID)
+        return {"id": item.id, "content": item.content, "memory_type": item.memory_type, "importance": item.importance, "created_at": item.created_at}
+    finally:
+        db.close()
+
+
+@router.delete("/memories/{memory_id}")
+def remove_memory(memory_id: int):
+    db = next(get_db())
+    try:
+        if not crud.delete_memory(db, memory_id, USER_ID):
+            raise HTTPException(status_code=404, detail="Memory not found")
+        return {"deleted": True}
+    finally:
+        db.close()
+
+
+@router.get("/documents")
+def list_documents():
+    return [{"filename": path.name, "size": path.stat().st_size} for path in DOCUMENTS_DIR.iterdir() if path.is_file()]
+
+
+@router.post("/documents")
+def upload_document(file: UploadFile = File(...)):
+    safe_name = Path(file.filename or "").name
+    if not safe_name or Path(safe_name).suffix.lower() not in {".txt", ".md", ".pdf", ".csv", ".py"}:
+        raise HTTPException(status_code=400, detail="Unsupported document type")
+    target = DOCUMENTS_DIR / safe_name
+    target.write_bytes(file.file.read())
+    ingestion = ingest_document(str(target))
+    return {
+        "filename": safe_name,
+        "status": "processed" if ingestion.get("success") else "uploaded",
+        "ingestion": ingestion,
+    }
