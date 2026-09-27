@@ -3,23 +3,22 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from app.agent.agent import VDSSAgent
 from app.api.dependencies import get_agent
 from app.api.schemas import (
     ChatRequest,
     ChatResponse,
-    HealthResponse,
     ConversationCreate,
     ConversationRename,
+    HealthResponse,
     MemoryCreate,
     NoteCreate,
     NoteUpdate,
     StudyPlanCreate,
 )
-from app.config.settings import APP_NAME
-from app.database.database import get_db
+from app.config.settings import APP_NAME, DOCUMENTS_DIR
 from app.database import crud
-from app.agent.agent import VDSSAgent
-from app.config.settings import DOCUMENTS_DIR
+from app.database.database import get_db
 from app.database.models import StudyPlan
 from app.tools.rag import ingest_document
 
@@ -28,53 +27,38 @@ router = APIRouter()
 USER_ID = 1
 
 
-@router.get(
-    "/health",
-    response_model=HealthResponse,
-)
+@router.get("/health", response_model=HealthResponse)
 def health():
-
-    return {
-        "status": "ok",
-        "application": APP_NAME,
-    }
+    return {"status": "ok", "application": APP_NAME}
 
 
-@router.post(
-    "/chat",
-    response_model=ChatResponse,
-)
-def chat(
-    request: ChatRequest,
-    agent: VDSSAgent = Depends(get_agent),
-):
-
-    db_generator = get_db()
-
-    db = next(db_generator)
-
+@router.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
+    db = next(get_db())
     try:
-
-        conversation = crud.get_conversation(db, request.conversation_id, USER_ID) if request.conversation_id else crud.create_conversation(db, USER_ID)
+        conversation = (
+            crud.get_conversation(db, request.conversation_id, USER_ID)
+            if request.conversation_id
+            else crud.create_conversation(db, USER_ID)
+        )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         crud.add_message(db, conversation.id, "user", request.message)
+        context = [
+            {"role": item.role, "content": item.content}
+            for item in crud.get_messages(db, conversation.id)[-20:]
+        ]
         response = agent.run(
             user_message=request.message,
             db=db,
+            conversation_messages=context,
         )
         crud.add_message(db, conversation.id, "assistant", response)
         if conversation.title == "New Chat":
             conversation.title = request.message.strip().splitlines()[0][:60]
             db.commit()
-
-        return {
-            "response": response,
-            "conversation_id": conversation.id,
-        }
-
+        return {"response": response, "conversation_id": conversation.id}
     finally:
-
         db.close()
 
 
@@ -85,7 +69,13 @@ def list_conversations():
         result = []
         for item in crud.get_conversations(db, USER_ID):
             messages = crud.get_messages(db, item.id)
-            result.append({"id": item.id, "title": item.title, "created_at": item.created_at, "updated_at": item.updated_at, "preview": messages[-1].content[:100] if messages else "Start a new study session"})
+            result.append({
+                "id": item.id,
+                "title": item.title,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at,
+                "preview": messages[-1].content[:100] if messages else "Start a new study session",
+            })
         return result
     finally:
         db.close()
@@ -108,7 +98,14 @@ def get_conversation(conversation_id: int):
         item = crud.get_conversation(db, conversation_id, USER_ID)
         if item is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        return {"id": item.id, "title": item.title, "messages": [{"id": message.id, "role": message.role, "content": message.content, "created_at": message.created_at} for message in crud.get_messages(db, conversation_id)]}
+        return {
+            "id": item.id,
+            "title": item.title,
+            "messages": [
+                {"id": message.id, "role": message.role, "content": message.content, "created_at": message.created_at}
+                for message in crud.get_messages(db, conversation_id)
+            ],
+        }
     finally:
         db.close()
 
@@ -148,19 +145,14 @@ def remove_all_conversations():
 
 
 @router.get("/notes")
-def list_notes():
+def list_notes(q: str | None = None):
     db = next(get_db())
     try:
-        return [
-            {
-                "id": note.id,
-                "title": note.title,
-                "content": note.content,
-                "subject": note.subject,
-                "created_at": note.created_at,
-            }
-            for note in crud.get_notes(db, user_id=USER_ID)
-        ]
+        notes = crud.get_notes(db, user_id=USER_ID)
+        if q:
+            query = q.casefold()
+            notes = [note for note in notes if query in note.title.casefold() or query in note.content.casefold()]
+        return [{"id": note.id, "title": note.title, "content": note.content, "subject": note.subject, "created_at": note.created_at} for note in notes]
     finally:
         db.close()
 
@@ -206,10 +198,7 @@ def remove_note(note_id: int):
 def list_study_plans():
     db = next(get_db())
     try:
-        return [
-            {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed}
-            for plan in crud.get_study_plans(db, USER_ID)
-        ]
+        return [{"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed} for plan in crud.get_study_plans(db, USER_ID)]
     finally:
         db.close()
 
@@ -279,13 +268,14 @@ def list_documents():
 @router.post("/documents")
 def upload_document(file: UploadFile = File(...)):
     safe_name = Path(file.filename or "").name
-    if not safe_name or Path(safe_name).suffix.lower() not in {".txt", ".md", ".pdf", ".csv", ".py"}:
+    allowed_extensions = {".txt", ".md", ".pdf", ".csv", ".py"}
+    if not safe_name or Path(safe_name).suffix.lower() not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Unsupported document type")
+    max_bytes = 10 * 1024 * 1024
+    content = file.file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="Document is too large")
     target = DOCUMENTS_DIR / safe_name
-    target.write_bytes(file.file.read())
+    target.write_bytes(content)
     ingestion = ingest_document(str(target))
-    return {
-        "filename": safe_name,
-        "status": "processed" if ingestion.get("success") else "uploaded",
-        "ingestion": ingestion,
-    }
+    return {"filename": safe_name, "status": "processed" if ingestion.get("success") else "uploaded", "ingestion": ingestion}
