@@ -16,6 +16,40 @@ class AgentPlanner:
             f"User request:\n{user_message}"
         )
 
+    def plan(self, user_message: str) -> dict:
+        """Return a small deterministic plan used to guide the agent."""
+        tool = self.infer_tool(user_message)
+        text = user_message.lower()
+        intent = "conversation"
+
+        if tool == "search_knowledge":
+            intent = "document_question"
+        elif tool in {"list_marks", "list_plans", "recall_information"}:
+            intent = "student_context"
+        elif tool:
+            intent = tool
+        elif any(word in text for word in ("explain", "what is", "how does", "define", "mark answer", "marks answer")):
+            intent = "study_question"
+
+        exam_mode = None
+        for marks in ("2", "5", "10", "16"):
+            if f"{marks} mark" in text or f"{marks}-mark" in text:
+                exam_mode = f"{marks}-mark"
+                break
+        if exam_mode:
+            intent = "study_question"
+
+        tasks = []
+        if tool:
+            tasks.append({"tool": tool, "purpose": "complete the requested study task"})
+
+        return {
+            "intent": intent,
+            "requires_tools": tool is not None,
+            "exam_mode": exam_mode,
+            "tasks": tasks,
+        }
+
     def infer_tool(self, user_message: str) -> str | None:
         text = user_message.lower().strip()
         if not text:
@@ -39,9 +73,20 @@ class AgentPlanner:
 
         if any(keyword in text for keyword in [
             "what do i struggle with", "what topic do i struggle", "weak subject",
-            "weakest subject", "what have i remembered", "my memory"
+            "weakest subject", "what have i remembered", "my memory",
+            "study preferences", "what do you remember"
         ]):
             return "recall_information"
+
+        if any(keyword in text for keyword in [
+            "latest", "search the web", "search online", "current release",
+        ]):
+            return "web_search"
+
+        if any(keyword in text for keyword in [
+            "python error", "traceback", "debug this code", "analyze this code",
+        ]):
+            return "analyze_python_code"
 
         if any(keyword in text for keyword in [
             "save this as a note", "add note", "write a note", "create note", "note:"
@@ -84,6 +129,9 @@ class AgentPlanner:
                     break
             expr = expr.strip("? .")
             expr = expr.replace("×", "*").replace("÷", "/").replace("^", "**")
+            percent_match = re.fullmatch(r"(\d+(?:\.\d+)?)%\s+of\s+(.+)", expr, re.IGNORECASE)
+            if percent_match:
+                expr = f"({percent_match.group(1)} / 100) * ({percent_match.group(2)})"
             return {"expression": expr}
 
         if tool_name == "remember_information":
@@ -121,5 +169,11 @@ class AgentPlanner:
         if tool_name == "search_knowledge":
             query = text.strip("? .")
             return {"query": query, "top_k": 5}
+
+        if tool_name == "web_search":
+            return {"query": text.strip("? ."), "max_results": 5}
+
+        if tool_name == "analyze_python_code":
+            return {"code": text}
 
         return {}
