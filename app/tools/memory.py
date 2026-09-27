@@ -41,6 +41,7 @@ def remember_information(
 def recall_information(
     db: Session,
     memory_type: str | None = None,
+    query: str | None = None,
     user_id: int | None = None,
 ) -> list[dict]:
 
@@ -50,7 +51,7 @@ def recall_information(
         user_id=user_id,
     )
 
-    return [
+    result = [
         {
             "id": memory.id,
             "content": memory.content,
@@ -60,3 +61,7 @@ def recall_information(
         }
         for memory in memories
     ]
+    if query:
+        query_text = query.casefold()
+        result = [item for item in result if query_text in item["content"].casefold()]
+    return result
