@@ -13,6 +13,8 @@ if OPENROUTER_API_KEY:
     client = OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
+        timeout=30.0,
+        max_retries=1,
     )
 
 
