@@ -29,15 +29,20 @@ class VDSSAgent:
         self,
         user_message: str,
         db: Session | None = None,
+        conversation_messages: list[dict[str, Any]] | None = None,
     ) -> str:
 
+        plan = self.planner.plan(user_message)
         self.memory.add_message(role="user", content=user_message)
 
         if not self._llm_available():
             return self._run_without_llm(user_message, db)
 
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(self.memory.get_conversation())
+        system_content = SYSTEM_PROMPT
+        if plan.get("exam_mode"):
+            system_content += f"\nThe student requested a {plan['exam_mode']} answer. Match that length and structure."
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
+        messages.extend(conversation_messages or self.memory.get_conversation())
 
         for _ in range(self.max_tool_iterations):
             try:
@@ -116,7 +121,7 @@ class VDSSAgent:
                 return self._format_tool_failure(tool_name, result)
             return self._format_tool_result(tool_name, result)
 
-        return self._default_direct_answer(user_message)
+        return "I could not complete that request within the allowed tool steps. Please try again."
 
     @staticmethod
     def _inject_database(
@@ -148,24 +153,9 @@ class VDSSAgent:
 
     @staticmethod
     def _default_direct_answer(user_message: str) -> str:
-        text = user_message.lower()
-
-        if "binary search" in text:
-            return (
-                "Binary search is a fast way to find a value in a sorted list. "
-                "It compares the target to the middle element, then keeps searching only on "
-                "the half that could still contain it. That reduces the search space dramatically."
-            )
-
-        if "recursion" in text:
-            return (
-                "Recursion is when a function calls itself to solve a smaller version of the same problem. "
-                "It is useful for tasks like tree traversal or factorials, but it needs a base case to stop."
-            )
-
         return (
-            "I can help with study explanations, calculations, notes, marks, study planning, and revision questions. "
-            "If you want, give me a more specific topic or task."
+            "SAGE's language model is not configured yet, so I cannot generate a reliable study explanation. "
+            "Configure the backend LLM key and try again."
         )
 
     @staticmethod
@@ -205,6 +195,19 @@ class VDSSAgent:
         if isinstance(result, list):
             if not result:
                 return "There are no matching results right now."
+            if tool_name == "list_marks":
+                return "Your saved marks are: " + "; ".join(
+                    f"{item.get('subject', 'Subject')}: {item.get('percentage', 0)}%"
+                    for item in result
+                )
+            if tool_name == "recall_information":
+                return "I remember: " + "; ".join(
+                    item.get("content", "") for item in result[:3]
+                )
+            if tool_name == "search_knowledge":
+                return "Relevant material from your documents: " + "; ".join(
+                    item.get("text", "")[:180] for item in result[:2]
+                )
             return str(result[:3])
 
         return str(result)
