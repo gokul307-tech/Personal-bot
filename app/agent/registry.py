@@ -320,6 +320,7 @@ def create_default_registry() -> ToolRegistry:
             "type": "object",
             "properties": {
                 "memory_type": {"type": "string"},
+                "query": {"type": "string", "description": "Optional words to match in saved memories."},
                 "user_id": {"type": "integer"},
             },
         },
