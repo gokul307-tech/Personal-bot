@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from app.config.settings import DATA_DIR
+
 
 ALLOWED_EXTENSIONS = {
     ".txt",
@@ -16,6 +18,11 @@ ALLOWED_EXTENSIONS = {
 def read_file(file_path: str) -> str:
 
     path = Path(file_path).resolve()
+
+    try:
+        path.relative_to(DATA_DIR.resolve())
+    except ValueError:
+        return "Error: File access is restricted to the project data directory."
 
     if not path.exists():
         return "Error: File does not exist."
