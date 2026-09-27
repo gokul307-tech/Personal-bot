@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.config.settings import DATA_DIR
+
 
 ALLOWED_EXTENSIONS = {
     ".csv",
@@ -13,6 +15,14 @@ def analyze_csv(
 ) -> dict:
 
     path = Path(file_path).resolve()
+
+    try:
+        path.relative_to(DATA_DIR.resolve())
+    except ValueError:
+        return {
+            "success": False,
+            "error": "CSV access is restricted to the project data directory.",
+        }
 
     if not path.exists():
 

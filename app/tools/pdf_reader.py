@@ -2,10 +2,17 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
+from app.config.settings import DATA_DIR
+
 
 def read_pdf(file_path: str) -> str:
 
     path = Path(file_path).resolve()
+
+    try:
+        path.relative_to(DATA_DIR.resolve())
+    except ValueError:
+        return "Error: PDF access is restricted to the project data directory."
 
     if not path.exists():
         return "Error: PDF does not exist."
