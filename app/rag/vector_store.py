@@ -78,6 +78,15 @@ def get_all_documents() -> list[dict[str, Any]]:
     return _load_store()
 
 
+def delete_documents_by_filename(filename: str) -> int:
+    store = _load_store()
+    remaining = [item for item in store if item.get("filename") != filename]
+    deleted = len(store) - len(remaining)
+    if deleted:
+        _save_store(remaining)
+    return deleted
+
+
 def cosine_similarity(
     first: list[float],
     second: list[float],
