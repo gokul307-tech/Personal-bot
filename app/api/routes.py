@@ -21,6 +21,7 @@ from app.database import crud
 from app.database.database import get_db
 from app.database.models import StudyPlan
 from app.tools.rag import ingest_document
+from app.rag.vector_store import delete_documents_by_filename, get_all_documents
 
 
 router = APIRouter()
@@ -231,10 +232,14 @@ def update_study_plan(plan_id: int, completed: bool):
 
 
 @router.get("/memories")
-def list_memories():
+def list_memories(q: str | None = None):
     db = next(get_db())
     try:
-        return [{"id": item.id, "content": item.content, "memory_type": item.memory_type, "importance": item.importance, "created_at": item.created_at} for item in crud.get_memories(db, user_id=USER_ID)]
+        memories = crud.get_memories(db, user_id=USER_ID)
+        if q:
+            query = q.casefold()
+            memories = [item for item in memories if query in item.content.casefold()]
+        return [{"id": item.id, "content": item.content, "memory_type": item.memory_type, "importance": item.importance, "created_at": item.created_at} for item in memories]
     finally:
         db.close()
 
@@ -261,8 +266,20 @@ def remove_memory(memory_id: int):
 
 
 @router.get("/documents")
-def list_documents():
-    return [{"filename": path.name, "size": path.stat().st_size} for path in DOCUMENTS_DIR.iterdir() if path.is_file()]
+def list_documents(q: str | None = None):
+    indexed = {item.get("filename") for item in get_all_documents()}
+    documents = []
+    for path in DOCUMENTS_DIR.iterdir():
+        if not path.is_file() or (q and q.casefold() not in path.name.casefold()):
+            continue
+        documents.append({
+            "filename": path.name,
+            "size": path.stat().st_size,
+            "file_type": path.suffix.lower().lstrip("."),
+            "uploaded_at": datetime.fromtimestamp(path.stat().st_mtime),
+            "status": "processed" if path.name in indexed else "uploaded",
+        })
+    return documents
 
 
 @router.post("/documents")
@@ -277,5 +294,19 @@ def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail="Document is too large")
     target = DOCUMENTS_DIR / safe_name
     target.write_bytes(content)
+    delete_documents_by_filename(safe_name)
     ingestion = ingest_document(str(target))
     return {"filename": safe_name, "status": "processed" if ingestion.get("success") else "uploaded", "ingestion": ingestion}
+
+
+@router.delete("/documents/{filename}")
+def remove_document(filename: str):
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid document name")
+    target = DOCUMENTS_DIR / safe_name
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+    target.unlink()
+    delete_documents_by_filename(safe_name)
+    return {"deleted": True, "filename": safe_name}
