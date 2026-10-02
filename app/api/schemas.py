@@ -43,6 +43,14 @@ class StudyPlanCreate(BaseModel):
     scheduled_at: str | None = None
 
 
+class StudyPlanUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    subject: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=50_000)
+    scheduled_at: str | None = None
+    completed: bool | None = None
+
+
 class MemoryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=10_000)
     memory_type: str = Field(default="general", max_length=50)
