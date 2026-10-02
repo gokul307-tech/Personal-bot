@@ -15,6 +15,7 @@ from app.api.schemas import (
     NoteCreate,
     NoteUpdate,
     StudyPlanCreate,
+    StudyPlanUpdate,
 )
 from app.config.settings import APP_NAME, DOCUMENTS_DIR
 from app.database import crud
@@ -218,15 +219,42 @@ def create_study_plan(request: StudyPlanCreate):
 
 
 @router.patch("/study-plans/{plan_id}")
-def update_study_plan(plan_id: int, completed: bool):
+def update_study_plan(
+    plan_id: int,
+    request: StudyPlanUpdate | None = None,
+    completed: bool | None = None,
+):
     db = next(get_db())
     try:
         plan = db.get(StudyPlan, plan_id)
         if plan is None or plan.user_id != USER_ID:
             raise HTTPException(status_code=404, detail="Study plan not found")
-        plan.completed = completed
+        updates = request.model_dump(exclude_unset=True) if request else {}
+        if completed is not None:
+            updates["completed"] = completed
+        if "scheduled_at" in updates:
+            try:
+                updates["scheduled_at"] = datetime.fromisoformat(updates["scheduled_at"]) if updates["scheduled_at"] else None
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="scheduled_at must be an ISO datetime") from exc
+        for field, value in updates.items():
+            setattr(plan, field, value)
         db.commit()
-        return {"id": plan.id, "completed": plan.completed}
+        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed}
+    finally:
+        db.close()
+
+
+@router.delete("/study-plans/{plan_id}")
+def delete_study_plan(plan_id: int):
+    db = next(get_db())
+    try:
+        plan = db.get(StudyPlan, plan_id)
+        if plan is None or plan.user_id != USER_ID:
+            raise HTTPException(status_code=404, detail="Study plan not found")
+        db.delete(plan)
+        db.commit()
+        return {"deleted": True}
     finally:
         db.close()
 
@@ -285,7 +313,7 @@ def list_documents(q: str | None = None):
 @router.post("/documents")
 def upload_document(file: UploadFile = File(...)):
     safe_name = Path(file.filename or "").name
-    allowed_extensions = {".txt", ".md", ".pdf", ".csv", ".py"}
+    allowed_extensions = {".txt", ".md", ".pdf", ".docx", ".csv", ".py"}
     if not safe_name or Path(safe_name).suffix.lower() not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Unsupported document type")
     max_bytes = 10 * 1024 * 1024
