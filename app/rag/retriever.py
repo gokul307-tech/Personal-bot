@@ -6,6 +6,7 @@ def retrieve(
     query: str,
     top_k: int = 5,
     minimum_score: float = 0.25,
+    filename: str | None = None,
 ) -> list[dict]:
 
     if not query.strip():
@@ -16,6 +17,7 @@ def retrieve(
     results = search(
         query_embedding=query_embedding,
         top_k=top_k,
+        filename=filename,
     )
 
     return [
