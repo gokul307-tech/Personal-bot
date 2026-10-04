@@ -263,12 +263,13 @@ def create_default_registry() -> ToolRegistry:
 
     registry.register(
         name="search_knowledge",
-        description="Search the indexed project documents for relevant chunks and context.",
+        description="Search indexed uploaded documents for relevant chunks. Use only when the user asks about uploaded study material; optionally restrict by the selected filename.",
         parameters={
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
                 "top_k": {"type": "integer", "minimum": 1, "maximum": 10},
+                "filename": {"type": "string", "description": "Optional uploaded document filename to restrict the search to."},
             },
             "required": ["query"],
         },
