@@ -45,6 +45,10 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
         )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        if request.source_filename:
+            safe_filename = Path(request.source_filename).name
+            if safe_filename != request.source_filename or not (DOCUMENTS_DIR / safe_filename).is_file():
+                raise HTTPException(status_code=404, detail="Selected document not found")
         crud.add_message(db, conversation.id, "user", request.message)
         context = [
             {"role": item.role, "content": item.content}
@@ -54,6 +58,7 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
             user_message=request.message,
             db=db,
             conversation_messages=context,
+            source_filename=request.source_filename,
         )
         crud.add_message(db, conversation.id, "assistant", response)
         if conversation.title == "New Chat":
@@ -305,7 +310,7 @@ def list_documents(q: str | None = None):
             "size": path.stat().st_size,
             "file_type": path.suffix.lower().lstrip("."),
             "uploaded_at": datetime.fromtimestamp(path.stat().st_mtime),
-            "status": "processed" if path.name in indexed else "uploaded",
+            "status": "ready" if path.name in indexed else "failed",
         })
     return documents
 
@@ -324,7 +329,9 @@ def upload_document(file: UploadFile = File(...)):
     target.write_bytes(content)
     delete_documents_by_filename(safe_name)
     ingestion = ingest_document(str(target))
-    return {"filename": safe_name, "status": "processed" if ingestion.get("success") else "uploaded", "ingestion": ingestion}
+    if not ingestion.get("success"):
+        raise HTTPException(status_code=422, detail="Could not process this document")
+    return {"filename": safe_name, "status": "ready", "ingestion": ingestion}
 
 
 @router.delete("/documents/{filename}")
