@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
         max_length=20_000,
     )
     conversation_id: int | None = None
+    source_filename: str | None = Field(default=None, max_length=255)
 
 
 class ChatResponse(BaseModel):
