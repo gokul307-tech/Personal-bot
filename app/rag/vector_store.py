@@ -122,6 +122,7 @@ def cosine_similarity(
 def search(
     query_embedding: list[float],
     top_k: int = 5,
+    filename: str | None = None,
 ) -> list[dict[str, Any]]:
 
     documents = _load_store()
@@ -129,6 +130,9 @@ def search(
     scored = []
 
     for document in documents:
+
+        if filename and document.get("filename") != filename:
+            continue
 
         embedding = document.get("embedding")
 
