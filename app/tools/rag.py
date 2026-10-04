@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 from uuid import uuid4
 
 from app.config.settings import (
@@ -11,6 +12,9 @@ from app.rag.document_loader import load_document
 from app.rag.retriever import retrieve
 from app.rag.vector_store import add_documents
 from app.tools.embeddings import create_embeddings
+
+
+logger = logging.getLogger(__name__)
 
 
 def ingest_document(
@@ -68,6 +72,7 @@ def ingest_document(
         }
 
     except Exception as exc:
+        logger.exception("Document ingestion failed for %s", path.name)
 
         return {
             "success": False,
@@ -87,11 +92,13 @@ def ingest_project_document(
 def search_knowledge(
     query: str,
     top_k: int = 5,
+    filename: str | None = None,
 ) -> list[dict]:
 
     results = retrieve(
         query=query,
         top_k=top_k,
+        filename=filename,
     )
 
     return [
