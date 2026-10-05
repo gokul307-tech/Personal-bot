@@ -158,6 +158,13 @@ class StudyPlan(Base):
         default=False,
     )
 
+    priority: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="medium",
+        server_default="medium",
+    )
+
 
 class Memory(Base):
 
