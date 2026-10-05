@@ -138,3 +138,46 @@ def test_chat_forwards_selected_document_to_existing_agent(tmp_path, monkeypatch
 		db = SessionLocal()
 		crud.delete_conversation(db, conversation_id, user_id=1)
 		db.close()
+
+
+def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monkeypatch):
+	monkeypatch.setattr(routes, "CHAT_ATTACHMENTS_DIR", tmp_path / "chat-attachments")
+	monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": True, "chunks_added": 1})
+	calls = []
+
+	class Agent:
+		def run(self, **kwargs):
+			calls.append(kwargs)
+			return "Answer grounded in the attachment."
+
+	app.dependency_overrides[get_agent] = Agent
+	db = SessionLocal()
+	conversation = crud.create_conversation(db, user_id=1, title="Attachment test")
+	conversation_id = conversation.id
+	db.close()
+	try:
+		with TestClient(app) as client:
+			response = client.post(
+				"/api/chat/attachments",
+				data={"message": "Explain this page", "conversation_id": conversation_id},
+				files={"file": ("os notes.txt", b"Operating systems study notes")},
+			)
+			assert response.status_code == 200
+			assert response.json()["conversation_id"] == conversation_id
+			assert calls[0]["user_message"] == "Explain this page"
+			assert calls[0]["source_filename"].startswith("attachment_")
+			assert calls[0]["conversation_messages"][-1]["content"] == "Explain this page"
+
+			conversation = client.get(f"/api/conversations/{conversation_id}").json()
+			assert "os notes.txt" in conversation["messages"][0]["content"]
+			follow_up = client.post("/api/chat", json={
+				"message": "What does it say about deadlocks?",
+				"conversation_id": conversation_id,
+			})
+			assert follow_up.status_code == 200
+			assert calls[1]["source_filename"] == calls[0]["source_filename"]
+	finally:
+		app.dependency_overrides.pop(get_agent, None)
+		db = SessionLocal()
+		crud.delete_conversation(db, conversation_id, user_id=1)
+		db.close()
