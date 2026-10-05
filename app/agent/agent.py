@@ -32,6 +32,7 @@ class VDSSAgent:
         db: Session | None = None,
         conversation_messages: list[dict[str, Any]] | None = None,
         source_filename: str | None = None,
+        preferences: dict[str, Any] | None = None,
     ) -> str:
 
         plan = self.planner.plan(user_message)
@@ -45,6 +46,24 @@ class VDSSAgent:
         system_content = SYSTEM_PROMPT
         if plan.get("exam_mode"):
             system_content += f"\nThe student requested a {plan['exam_mode']} answer. Match that length and structure."
+        if preferences:
+            styles = {"simple": "Use simple, accessible language.", "balanced": "Use a balanced level of detail.", "detailed": "Give a thorough explanation with useful examples."}
+            lengths = {"short": "Keep answers concise.", "medium": "Use a moderate answer length.", "detailed": "Give a detailed answer with clear structure."}
+            response_style = preferences.get("response_style")
+            answer_length = preferences.get("answer_length")
+            if response_style in styles:
+                system_content += f"\n{styles[response_style]}"
+            if answer_length in lengths:
+                system_content += f"\n{lengths[answer_length]}"
+            exam_mode = preferences.get("default_exam_mode")
+            if exam_mode in {"2", "5", "10", "16"}:
+                system_content += f"\nFor exam-answer requests without an explicit mark value, use a {exam_mode}-mark structure."
+            if preferences.get("beginner_friendly"):
+                system_content += "\nExplain unfamiliar terms for a beginner."
+            if preferences.get("prefer_uploaded_materials"):
+                system_content += "\nPrefer relevant uploaded study materials when they can answer the request."
+            if preferences.get("show_sources"):
+                system_content += "\nName the uploaded source when using retrieved study material."
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
         if source_filename:
             try:
