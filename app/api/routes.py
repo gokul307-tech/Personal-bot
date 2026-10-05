@@ -1,7 +1,12 @@
 from datetime import datetime
+import json
+import mimetypes
 from pathlib import Path
+from uuid import uuid4
+import shutil
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app.agent.agent import VDSSAgent
 from app.api.dependencies import get_agent
@@ -17,7 +22,7 @@ from app.api.schemas import (
     StudyPlanCreate,
     StudyPlanUpdate,
 )
-from app.config.settings import APP_NAME, DOCUMENTS_DIR
+from app.config.settings import APP_NAME, DOCUMENTS_DIR, UPLOADS_DIR
 from app.database import crud
 from app.database.database import get_db
 from app.database.models import StudyPlan
@@ -27,6 +32,38 @@ from app.rag.vector_store import delete_documents_by_filename, get_all_documents
 
 router = APIRouter()
 USER_ID = 1
+CHAT_ATTACHMENTS_DIR = UPLOADS_DIR / "chat-attachments"
+ATTACHMENT_MARKER = "\n\n<!--sage-attachments:"
+
+
+def _message_attachments(content: str) -> list[dict]:
+    marker_index = content.rfind(ATTACHMENT_MARKER)
+    if marker_index < 0 or not content.endswith("-->"):
+        return []
+    try:
+        attachments = json.loads(content[marker_index + len(ATTACHMENT_MARKER):-3])
+    except json.JSONDecodeError:
+        return []
+    return attachments if isinstance(attachments, list) else []
+
+
+def _message_text(content: str) -> str:
+    marker_index = content.rfind(ATTACHMENT_MARKER)
+    return content[:marker_index] if marker_index >= 0 else content
+
+
+def _delete_conversation_attachments(conversation_id: int, db) -> None:
+    folder = CHAT_ATTACHMENTS_DIR / str(conversation_id)
+    if not folder.exists():
+        return
+    for message in crud.get_messages(db, conversation_id):
+        for attachment in _message_attachments(message.content):
+            filename = Path(str(attachment.get("source", ""))).name
+            if not filename:
+                continue
+            delete_documents_by_filename(filename)
+            (folder / filename).unlink(missing_ok=True)
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -47,24 +84,111 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
             raise HTTPException(status_code=404, detail="Conversation not found")
         if request.source_filename:
             safe_filename = Path(request.source_filename).name
-            if safe_filename != request.source_filename or not (DOCUMENTS_DIR / safe_filename).is_file():
+            library_path = DOCUMENTS_DIR / safe_filename
+            attachment_path = CHAT_ATTACHMENTS_DIR / str(conversation.id) / safe_filename
+            if safe_filename != request.source_filename or not (library_path.is_file() or attachment_path.is_file()):
                 raise HTTPException(status_code=404, detail="Selected document not found")
         crud.add_message(db, conversation.id, "user", request.message)
+        stored_messages = crud.get_messages(db, conversation.id)
+        if not request.source_filename:
+            if request.keep_attachment_context:
+                for item in reversed(stored_messages[:-1]):
+                    attachments = _message_attachments(item.content)
+                    if attachments:
+                        request.source_filename = attachments[-1].get("source")
+                        break
         context = [
-            {"role": item.role, "content": item.content}
-            for item in crud.get_messages(db, conversation.id)[-20:]
+            {"role": item.role, "content": _message_text(item.content)}
+            for item in stored_messages[-20:]
         ]
         response = agent.run(
             user_message=request.message,
             db=db,
             conversation_messages=context,
             source_filename=request.source_filename,
+            preferences=request.preferences.model_dump(),
         )
         crud.add_message(db, conversation.id, "assistant", response)
-        if conversation.title == "New Chat":
+        if request.auto_title and conversation.title == "New Chat":
             conversation.title = request.message.strip().splitlines()[0][:60]
             db.commit()
         return {"response": response, "conversation_id": conversation.id}
+    finally:
+        db.close()
+
+
+@router.post("/chat/attachments", response_model=ChatResponse)
+async def chat_with_attachment(
+    message: str = Form(..., min_length=1, max_length=20_000),
+    conversation_id: int | None = Form(default=None),
+    file: UploadFile = File(...),
+    preferences: str = Form(default="{}"),
+    auto_title: bool = Form(default=True),
+    agent: VDSSAgent = Depends(get_agent),
+):
+    db = next(get_db())
+    stored_path: Path | None = None
+    source_filename: str | None = None
+    message_saved = False
+    try:
+        conversation = (
+            crud.get_conversation(db, conversation_id, USER_ID)
+            if conversation_id
+            else crud.create_conversation(db, USER_ID)
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        display_name = Path(file.filename or "").name
+        extension = Path(display_name).suffix.lower()
+        if not display_name or extension not in {".txt", ".md", ".pdf", ".docx", ".csv", ".py"}:
+            raise HTTPException(status_code=400, detail="Unsupported document type")
+        content = await file.read(10 * 1024 * 1024 + 1)
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Document is too large")
+
+        source_filename = f"attachment_{uuid4().hex}{extension}"
+        folder = CHAT_ATTACHMENTS_DIR / str(conversation.id)
+        folder.mkdir(parents=True, exist_ok=True)
+        stored_path = folder / source_filename
+        stored_path.write_bytes(content)
+        ingestion = ingest_document(str(stored_path))
+        if not ingestion.get("success"):
+            delete_documents_by_filename(source_filename)
+            stored_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail="Could not process this attachment")
+
+        attachment = {
+            "filename": display_name,
+            "file_type": extension.lstrip("."),
+            "size": len(content),
+            "source": source_filename,
+        }
+        marker = ATTACHMENT_MARKER + json.dumps([attachment], ensure_ascii=True) + "-->"
+        crud.add_message(db, conversation.id, "user", message + marker)
+        message_saved = True
+        context = [
+            {"role": item.role, "content": _message_text(item.content)}
+            for item in crud.get_messages(db, conversation.id)[-20:]
+        ]
+        response = agent.run(
+            user_message=message,
+            db=db,
+            conversation_messages=context,
+            source_filename=source_filename,
+            preferences=json.loads(preferences),
+        )
+        crud.add_message(db, conversation.id, "assistant", response)
+        if auto_title and conversation.title == "New Chat":
+            conversation.title = message.strip().splitlines()[0][:60]
+            db.commit()
+        return {"response": response, "conversation_id": conversation.id}
+    except Exception:
+        if source_filename and not message_saved:
+            delete_documents_by_filename(source_filename)
+        if stored_path and not message_saved:
+            stored_path.unlink(missing_ok=True)
+        raise
     finally:
         db.close()
 
@@ -135,6 +259,7 @@ def rename_conversation(conversation_id: int, request: ConversationRename):
 def remove_conversation(conversation_id: int):
     db = next(get_db())
     try:
+        _delete_conversation_attachments(conversation_id, db)
         if not crud.delete_conversation(db, conversation_id, USER_ID):
             raise HTTPException(status_code=404, detail="Conversation not found")
         return {"deleted": True}
@@ -146,6 +271,8 @@ def remove_conversation(conversation_id: int):
 def remove_all_conversations():
     db = next(get_db())
     try:
+        for conversation in crud.get_conversations(db, USER_ID):
+            _delete_conversation_attachments(conversation.id, db)
         return {"deleted": crud.delete_all_conversations(db, USER_ID)}
     finally:
         db.close()
@@ -205,7 +332,7 @@ def remove_note(note_id: int):
 def list_study_plans():
     db = next(get_db())
     try:
-        return [{"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed} for plan in crud.get_study_plans(db, USER_ID)]
+        return [{"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority} for plan in crud.get_study_plans(db, USER_ID)]
     finally:
         db.close()
 
@@ -215,8 +342,8 @@ def create_study_plan(request: StudyPlanCreate):
     db = next(get_db())
     try:
         scheduled_at = datetime.fromisoformat(request.scheduled_at) if request.scheduled_at else None
-        plan = crud.create_study_plan(db, request.title, request.subject, request.description, scheduled_at, USER_ID)
-        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed}
+        plan = crud.create_study_plan(db, request.title, request.subject, request.description, scheduled_at, USER_ID, request.priority)
+        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="scheduled_at must be an ISO datetime") from exc
     finally:
@@ -245,7 +372,7 @@ def update_study_plan(
         for field, value in updates.items():
             setattr(plan, field, value)
         db.commit()
-        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed}
+        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority}
     finally:
         db.close()
 
@@ -313,6 +440,18 @@ def list_documents(q: str | None = None):
             "status": "ready" if path.name in indexed else "failed",
         })
     return documents
+
+
+@router.get("/documents/{filename}/open")
+def open_document(filename: str):
+    safe_name = Path(filename).name
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid document name")
+    target = DOCUMENTS_DIR / safe_name
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+    media_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+    return FileResponse(target, media_type=media_type)
 
 
 @router.post("/documents")
