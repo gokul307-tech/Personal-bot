@@ -13,6 +13,12 @@ def test_planner_classifies_exam_and_calculator_intent():
     arguments = planner.build_tool_arguments("Calculate 25% of 480.", "calculator")
     assert arguments["expression"] == "(25 / 100) * (480)"
 
+    plan = planner.build_tool_arguments(
+        "Create a study plan for I have 3 days to prepare for OS. Save it using the study-plan tool.",
+        "create_plan",
+    )
+    assert plan["subject"] == "OS"
+
 
 def test_deterministic_calculator_path_returns_natural_result():
     agent = VDSSAgent(create_default_registry())
