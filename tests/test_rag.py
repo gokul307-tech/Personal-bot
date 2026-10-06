@@ -20,13 +20,16 @@ def test_retriever_limits_results_to_selected_filename(tmp_path, monkeypatch):
 	vector_store.add_documents([
 		{"id": "1", "filename": "os.pdf", "text": "Deadlock in operating systems", "embedding": [1.0, 0.0]},
 		{"id": "2", "filename": "dbms.pdf", "text": "Database normalization", "embedding": [1.0, 0.0]},
+		{"id": "3", "filename": "attachment_private.txt", "text": "Private conversation material", "embedding": [1.0, 0.0], "private": True},
 	])
 
 	results = retriever.retrieve("deadlock", filename="os.pdf")
 
 	assert [item["filename"] for item in results] == ["os.pdf"]
+	assert all(item["filename"] != "attachment_private.txt" for item in retriever.retrieve("material"))
+	assert [item["filename"] for item in retriever.retrieve("material", filename="attachment_private.txt")] == ["attachment_private.txt"]
 	assert vector_store.delete_documents_by_filename("os.pdf") == 1
-	assert [item["filename"] for item in vector_store.get_all_documents()] == ["dbms.pdf"]
+	assert {item["filename"] for item in vector_store.get_all_documents()} == {"dbms.pdf", "attachment_private.txt"}
 
 
 def test_existing_docx_loader_extracts_paragraph_text(tmp_path):
@@ -92,6 +95,9 @@ def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatc
 		assert listed[0]["filename"] == "ready.txt"
 		assert listed[0]["status"] == "ready"
 		assert listed[0]["file_type"] == "txt"
+		opened = client.get("/api/documents/ready.txt/open")
+		assert opened.status_code == 200
+		assert opened.content == b"study text"
 
 		monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": False, "error": "internal detail"})
 		failed = client.post("/api/documents", files={"file": ("failed.txt", b"bad document")})
@@ -142,7 +148,8 @@ def test_chat_forwards_selected_document_to_existing_agent(tmp_path, monkeypatch
 
 def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monkeypatch):
 	monkeypatch.setattr(routes, "CHAT_ATTACHMENTS_DIR", tmp_path / "chat-attachments")
-	monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": True, "chunks_added": 1})
+	ingested = []
+	monkeypatch.setattr(routes, "ingest_document", lambda path, **kwargs: ingested.append((path, kwargs)) or {"success": True, "chunks_added": 1})
 	calls = []
 
 	class Agent:
@@ -164,6 +171,7 @@ def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monk
 			)
 			assert response.status_code == 200
 			assert response.json()["conversation_id"] == conversation_id
+			assert ingested[0][1] == {"private": True}
 			assert calls[0]["user_message"] == "Explain this page"
 			assert calls[0]["source_filename"].startswith("attachment_")
 			assert calls[0]["conversation_messages"][-1]["content"] == "Explain this page"
@@ -181,3 +189,60 @@ def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monk
 		db = SessionLocal()
 		crud.delete_conversation(db, conversation_id, user_id=1)
 		db.close()
+
+
+def test_study_plan_priority_persists_through_existing_api():
+	with TestClient(app) as client:
+		created = client.post("/api/study-plans", json={
+			"title": "Priority persistence test",
+			"subject": "Operating Systems",
+			"priority": "high",
+		})
+		assert created.status_code == 200
+		plan_id = created.json()["id"]
+		try:
+			assert created.json()["priority"] == "high"
+			updated = client.patch(f"/api/study-plans/{plan_id}", json={"priority": "low"})
+			assert updated.status_code == 200
+			assert updated.json()["priority"] == "low"
+			listed = client.get("/api/study-plans").json()
+			assert next(plan for plan in listed if plan["id"] == plan_id)["priority"] == "low"
+		finally:
+			client.delete(f"/api/study-plans/{plan_id}")
+
+
+def test_natural_language_study_plan_is_saved_as_daily_tasks():
+	with TestClient(app) as client:
+		response = client.post("/api/study-plans/from-request", json={
+			"request": "I have 3 days to prepare for OS",
+		})
+		assert response.status_code == 200
+		tasks = response.json()["tasks"]
+		try:
+			assert len(tasks) == 3
+			assert {task["subject"] for task in tasks} == {"OS"}
+			assert [task["priority"] for task in tasks] == ["medium"] * 3
+			assert all(task["scheduled_at"] for task in tasks)
+		finally:
+			for task in tasks:
+				client.delete(f"/api/study-plans/{task['id']}")
+
+
+def test_notes_create_edit_search_and_delete_use_existing_api():
+	with TestClient(app) as client:
+		created = client.post("/api/notes", json={
+			"title": "Workspace CRUD verification",
+			"subject": "Regression QA",
+			"content": "Notes should remain searchable by subject.",
+		})
+		assert created.status_code == 200
+		note_id = created.json()["id"]
+		try:
+			updated = client.patch(f"/api/notes/{note_id}", json={"title": "Updated workspace note"})
+			assert updated.status_code == 200
+			assert updated.json()["title"] == "Updated workspace note"
+			search = client.get("/api/notes?q=Regression%20QA").json()
+			assert any(note["id"] == note_id for note in search)
+		finally:
+			deleted = client.delete(f"/api/notes/{note_id}")
+			assert deleted.status_code == 200
