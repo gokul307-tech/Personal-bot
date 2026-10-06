@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import mimetypes
 from pathlib import Path
+import re
 from uuid import uuid4
 import shutil
 
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.agent.agent import VDSSAgent
+from app.agent.planner import AgentPlanner
 from app.api.dependencies import get_agent
 from app.api.schemas import (
     ChatRequest,
@@ -20,6 +22,7 @@ from app.api.schemas import (
     NoteCreate,
     NoteUpdate,
     StudyPlanCreate,
+    StudyPlanRequest,
     StudyPlanUpdate,
 )
 from app.config.settings import APP_NAME, DOCUMENTS_DIR, UPLOADS_DIR
@@ -152,7 +155,7 @@ async def chat_with_attachment(
         folder.mkdir(parents=True, exist_ok=True)
         stored_path = folder / source_filename
         stored_path.write_bytes(content)
-        ingestion = ingest_document(str(stored_path))
+        ingestion = ingest_document(str(stored_path), private=True)
         if not ingestion.get("success"):
             delete_documents_by_filename(source_filename)
             stored_path.unlink(missing_ok=True)
@@ -205,7 +208,7 @@ def list_conversations():
                 "title": item.title,
                 "created_at": item.created_at,
                 "updated_at": item.updated_at,
-                "preview": messages[-1].content[:100] if messages else "Start a new study session",
+                "preview": _message_text(messages[-1].content)[:100] if messages else "Start a new study session",
             })
         return result
     finally:
@@ -285,7 +288,7 @@ def list_notes(q: str | None = None):
         notes = crud.get_notes(db, user_id=USER_ID)
         if q:
             query = q.casefold()
-            notes = [note for note in notes if query in note.title.casefold() or query in note.content.casefold()]
+            notes = [note for note in notes if query in note.title.casefold() or query in note.content.casefold() or query in (note.subject or "").casefold()]
         return [{"id": note.id, "title": note.title, "content": note.content, "subject": note.subject, "created_at": note.created_at} for note in notes]
     finally:
         db.close()
@@ -346,6 +349,49 @@ def create_study_plan(request: StudyPlanCreate):
         return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="scheduled_at must be an ISO datetime") from exc
+    finally:
+        db.close()
+
+
+@router.post("/study-plans/from-request")
+def create_study_plan_from_request(request: StudyPlanRequest):
+    db = next(get_db())
+    try:
+        arguments = AgentPlanner().build_tool_arguments(
+            f"Create a study plan for {request.request}",
+            "create_plan",
+        )
+        subject = arguments.get("subject") or "General"
+        duration = re.search(r"\b(\d{1,2})\s+days?\b", request.request, re.IGNORECASE)
+        days = min(int(duration.group(1)), 30) if duration else 1
+        today = datetime.now().replace(hour=18, minute=0, second=0, microsecond=0)
+        activities = [
+            "Review the core concepts and identify topics to revisit.",
+            "Practice representative questions and review mistakes.",
+            "Revisit weak areas and complete a timed self-test.",
+        ]
+        tasks = []
+        for index in range(days):
+            activity = activities[index] if days == 3 else f"Study {subject} concepts and complete focused practice for day {index + 1}."
+            plan = crud.create_study_plan(
+                db=db,
+                title=f"{subject} - Day {index + 1}/{days}" if days > 1 else f"Study {subject}",
+                subject=subject,
+                description=activity if days > 1 else request.request,
+                scheduled_at=today + timedelta(days=index),
+                user_id=USER_ID,
+                priority=request.priority,
+            )
+            tasks.append({
+                "id": plan.id,
+                "title": plan.title,
+                "subject": plan.subject,
+                "description": plan.description,
+                "scheduled_at": plan.scheduled_at,
+                "completed": plan.completed,
+                "priority": plan.priority,
+            })
+        return {"tasks": tasks}
     finally:
         db.close()
 
