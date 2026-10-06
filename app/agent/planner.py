@@ -158,8 +158,15 @@ class AgentPlanner:
             title = "Study plan"
             subject = "General"
             lower = text.lower()
-            if "for " in lower:
-                subject = text.split("for", 1)[1].strip(" ?.") or subject
+            subject_match = re.search(r"\b(?:prepare|preparing|study|revise)\s+for\s+([a-z0-9][a-z0-9 &_-]*?)(?=[.!?,;:]|$)", text, re.IGNORECASE)
+            if subject_match:
+                subject = subject_match.group(1).strip()
+            else:
+                subject_match = re.search(r"\bfor\s+([a-z0-9][a-z0-9 &_-]*?)(?=[.!?,;:]|$)", text, re.IGNORECASE)
+                if subject_match:
+                    subject = subject_match.group(1).strip()
+            if subject != "General":
+                title = f"Study plan for {subject}"
             return {"title": title, "subject": subject, "description": text}
 
         if tool_name == "generate_quiz":
