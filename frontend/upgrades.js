@@ -70,7 +70,7 @@ async function renderNotesList(query){
     if(!notes.length){list.innerHTML=`<div class="upgrade-empty">${query?'No notes match your search.':'No notes yet. Create a note to keep useful study material here.'}</div>`;return;}
     list.innerHTML=notes.map(note=>`<article class="upgrade-row"><div class="upgrade-row-main"><strong>${escapeHtml(note.title)}</strong><small>${escapeHtml(note.subject||'General')} · ${formatDate(note.created_at)}</small><p>${escapeHtml(note.content.slice(0,180))}${note.content.length>180?'…':''}</p></div><div class="upgrade-row-actions"><button data-note-view="${note.id}">View</button><button data-note-ask="${note.id}">Ask SAGE</button><button data-note-edit="${note.id}">Edit</button><button data-note-delete="${note.id}">Delete</button></div></article>`).join('');
     list.querySelectorAll('[data-note-view]').forEach(button=>button.onclick=()=>viewNote(notes.find(note=>note.id===Number(button.dataset.noteView))));
-    list.querySelectorAll('[data-note-ask]').forEach(button=>button.onclick=()=>{const note=notes.find(item=>item.id===Number(button.dataset.noteAsk));startPrompt(`Use this saved note to help answer my question.\n\nNote: ${note.title}\n${note.content}\n\nQuestion: `)});
+    list.querySelectorAll('[data-note-ask]').forEach(button=>button.onclick=()=>{const note=notes.find(item=>item.id===Number(button.dataset.noteAsk));const content=note.content.slice(0,14000);startPrompt(`Use this saved note to help answer my question.\n\nNote: ${note.title}\n${content}${note.content.length>content.length?'\n[Note excerpt shortened to fit the chat message limit.]':''}\n\nQuestion: `)});
     list.querySelectorAll('[data-note-edit]').forEach(button=>button.onclick=()=>showNoteEditor(notes.find(note=>note.id===Number(button.dataset.noteEdit))));
     list.querySelectorAll('[data-note-delete]').forEach(button=>button.onclick=async()=>{if(!confirm('Delete this note?'))return;button.disabled=true;try{await api(`/api/notes/${button.dataset.noteDelete}`,{method:'DELETE'});if(selectedNote?.id===Number(button.dataset.noteDelete))selectedNote=null;toast('Note deleted.');await renderNotesList(query);if(!selectedNote)viewNote(null)}catch{button.disabled=false;toast('SAGE could not delete this note.')}});
   }catch{list.innerHTML='<div class="upgrade-empty">Notes could not be loaded. Check your connection and try again.</div>';toast('SAGE could not load notes.');}
@@ -157,10 +157,17 @@ function renderSettings(){
   document.documentElement.dataset.density=localStorage.getItem('sage-density')||'comfortable';document.documentElement.dataset.showTimestamps=String(preferences.showTimestamps);
 }
 async function exportWorkspaceData(){
-  try{const [conversations,notes,plans,memories,documents]=await Promise.all([api('/api/conversations'),api('/api/notes'),api('/api/study-plans'),api('/api/memories'),api('/api/documents')]);const blob=new Blob([JSON.stringify({exported_at:new Date().toISOString(),conversations,notes,study_plans:plans,memories,documents},null,2)],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='sage-workspace-export.json';link.click();URL.revokeObjectURL(link.href);toast('Workspace data exported.');}catch{toast('SAGE could not export workspace data.');}
+  try{const [conversations,notes,plans,memories,documents]=await Promise.all([api('/api/conversations'),api('/api/notes'),api('/api/study-plans'),api('/api/memories'),api('/api/documents')]);const transcripts=await Promise.all(conversations.map(item=>api(`/api/conversations/${item.id}`)));const blob=new Blob([JSON.stringify({exported_at:new Date().toISOString(),conversations:transcripts,notes,study_plans:plans,memories,documents},null,2)],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='sage-workspace-export.json';link.click();URL.revokeObjectURL(link.href);toast('Workspace data exported.');}catch{toast('SAGE could not export workspace data.');}
 }
 async function clearCompletedTasks(){try{const plans=await api('/api/study-plans');await Promise.all(plans.filter(task=>task.completed).map(task=>api(`/api/study-plans/${task.id}`,{method:'DELETE'})));toast('Completed tasks cleared.');if(state.view==='study')await refreshPlans();}catch{toast('SAGE could not clear completed tasks.');}}
 function agentPreferences(){return {response_style:preferences.responseStyle,answer_length:preferences.answerLength,default_exam_mode:preferences.defaultExamMode,beginner_friendly:preferences.beginnerFriendly,prefer_uploaded_materials:preferences.preferUploadedMaterials,show_sources:preferences.showSources,study_style:preferences.studyStyle,quiz_difficulty:preferences.quizDifficulty};}
+const baseApi=api;
+api=async function(path,options={}){
+  if(path==='/api/chat'&&typeof options.body==='string'){
+    try{const body=JSON.parse(options.body);body.preferences=agentPreferences();body.auto_title=preferences.autoTitles;body.keep_attachment_context=preferences.keepAttachmentContext;options={...options,body:JSON.stringify(body)};}catch{}
+  }
+  return baseApi(path,options);
+};
 
 function attachmentFromContent(content){
   const marker='\n\n<!--sage-attachments:';const index=content.lastIndexOf(marker);if(index<0||!content.endsWith('-->'))return {content,attachments:[]};
