@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 def ingest_document(
     file_path: str,
+    *,
+    private: bool = False,
 ) -> dict:
 
     path = Path(file_path).resolve()
@@ -60,6 +62,7 @@ def ingest_document(
                     "chunk_index": index,
                     "text": chunk,
                     "embedding": embedding,
+                    "private": private,
                 }
             )
 
