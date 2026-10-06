@@ -131,6 +131,9 @@ def search(
 
     for document in documents:
 
+        if document.get("private") and not filename:
+            continue
+
         if filename and document.get("filename") != filename:
             continue
 
