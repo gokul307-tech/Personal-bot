@@ -22,6 +22,8 @@ class ChatPreferences(BaseModel):
     beginner_friendly: bool = True
     prefer_uploaded_materials: bool = True
     show_sources: bool = True
+    study_style: Literal["focused blocks", "short sessions", "deep work"] = "focused blocks"
+    quiz_difficulty: Literal["easy", "medium", "hard"] = "medium"
 
 
 class ChatResponse(BaseModel):
@@ -65,6 +67,11 @@ class StudyPlanUpdate(BaseModel):
     scheduled_at: str | None = None
     completed: bool | None = None
     priority: Literal["low", "medium", "high"] | None = None
+
+
+class StudyPlanRequest(BaseModel):
+    request: str = Field(min_length=1, max_length=2_000)
+    priority: Literal["low", "medium", "high"] = "medium"
 
 
 class MemoryCreate(BaseModel):
