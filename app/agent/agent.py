@@ -64,6 +64,12 @@ class VDSSAgent:
                 system_content += "\nPrefer relevant uploaded study materials when they can answer the request."
             if preferences.get("show_sources"):
                 system_content += "\nName the uploaded source when using retrieved study material."
+            study_style = preferences.get("study_style")
+            if study_style in {"focused blocks", "short sessions", "deep work"}:
+                system_content += f"\nPrefer {study_style} when suggesting a study schedule."
+            quiz_difficulty = preferences.get("quiz_difficulty")
+            if quiz_difficulty in {"easy", "medium", "hard"}:
+                system_content += f"\nUse {quiz_difficulty} difficulty for quizzes unless the student asks otherwise."
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
         if source_filename:
             try:
