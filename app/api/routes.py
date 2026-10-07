@@ -8,12 +8,14 @@ import shutil
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 
 from app.agent.agent import VDSSAgent
 from app.agent.planner import AgentPlanner
 from app.api.dependencies import get_agent
 from app.api.schemas import (
     ChatRequest,
+    ChatPreferences,
     ChatResponse,
     ConversationCreate,
     ConversationRename,
@@ -30,7 +32,7 @@ from app.database import crud
 from app.database.database import get_db
 from app.database.models import StudyPlan
 from app.tools.rag import ingest_document
-from app.rag.vector_store import delete_documents_by_filename, get_all_documents
+from app.rag.vector_store import add_documents, delete_documents_by_filename, get_all_documents
 
 
 router = APIRouter()
@@ -129,6 +131,11 @@ async def chat_with_attachment(
     auto_title: bool = Form(default=True),
     agent: VDSSAgent = Depends(get_agent),
 ):
+    try:
+        chat_preferences = ChatPreferences.model_validate_json(preferences)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="Invalid chat preferences") from exc
+
     db = next(get_db())
     stored_path: Path | None = None
     source_filename: str | None = None
@@ -179,7 +186,7 @@ async def chat_with_attachment(
             db=db,
             conversation_messages=context,
             source_filename=source_filename,
-            preferences=json.loads(preferences),
+            preferences=chat_preferences.model_dump(),
         )
         crud.add_message(db, conversation.id, "assistant", response)
         if auto_title and conversation.title == "New Chat":
@@ -511,11 +518,29 @@ def upload_document(file: UploadFile = File(...)):
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail="Document is too large")
     target = DOCUMENTS_DIR / safe_name
-    target.write_bytes(content)
-    delete_documents_by_filename(safe_name)
-    ingestion = ingest_document(str(target))
-    if not ingestion.get("success"):
-        raise HTTPException(status_code=422, detail="Could not process this document")
+    previous_content = target.read_bytes() if target.exists() else None
+    previous_documents = [item for item in get_all_documents() if item.get("filename") == safe_name]
+    temporary = DOCUMENTS_DIR / f".{uuid4().hex}{target.suffix}"
+    try:
+        temporary.write_bytes(content)
+        temporary.replace(target)
+        delete_documents_by_filename(safe_name)
+        ingestion = ingest_document(str(target))
+        if not ingestion.get("success"):
+            raise HTTPException(status_code=422, detail="Could not process this document")
+    except Exception:
+        if previous_content is None:
+            target.unlink(missing_ok=True)
+        else:
+            restore = DOCUMENTS_DIR / f".{uuid4().hex}{target.suffix}"
+            restore.write_bytes(previous_content)
+            restore.replace(target)
+        delete_documents_by_filename(safe_name)
+        if previous_documents:
+            add_documents(previous_documents)
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
     return {"filename": safe_name, "status": "ready", "ingestion": ingestion}
 
 
