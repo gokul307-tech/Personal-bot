@@ -1,3 +1,5 @@
+import json
+import pytest
 from fastapi.testclient import TestClient
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -12,6 +14,8 @@ import app.api.routes as routes
 from app.api.dependencies import get_agent
 from app.database import crud
 from app.database.database import SessionLocal
+from app.services import document_service
+from app.tools import embeddings
 
 
 def test_retriever_limits_results_to_selected_filename(tmp_path, monkeypatch):
@@ -112,6 +116,74 @@ def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatc
 
 		unsupported = client.post("/api/documents", files={"file": ("bad.exe", b"no")})
 		assert unsupported.status_code == 400
+
+
+def test_failed_document_replacement_restores_file_and_index(tmp_path, monkeypatch):
+	monkeypatch.setattr(routes, "DOCUMENTS_DIR", tmp_path)
+	stored = [{"filename": "study.txt", "text": "previous index", "embedding": [1.0]}]
+
+	def delete_documents(filename):
+		stored[:] = [item for item in stored if item["filename"] != filename]
+
+	monkeypatch.setattr(routes, "get_all_documents", lambda: list(stored))
+	monkeypatch.setattr(routes, "delete_documents_by_filename", delete_documents)
+	monkeypatch.setattr(routes, "add_documents", lambda documents: stored.extend(documents))
+	monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": False})
+	(tmp_path / "study.txt").write_bytes(b"previous file")
+
+	with TestClient(app) as client:
+		response = client.post("/api/documents", files={"file": ("study.txt", b"replacement")})
+
+	assert response.status_code == 422
+	assert (tmp_path / "study.txt").read_bytes() == b"previous file"
+	assert stored == [{"filename": "study.txt", "text": "previous index", "embedding": [1.0]}]
+
+
+def test_chat_and_note_requests_reject_blank_text():
+	with TestClient(app) as client:
+		assert client.post("/api/chat", json={"message": "   "}).status_code == 422
+		assert client.post("/api/notes", json={"title": "  ", "content": "note"}).status_code == 422
+
+
+def test_attachment_chat_rejects_invalid_preferences_before_writing_files(tmp_path, monkeypatch):
+	monkeypatch.setattr(routes, "CHAT_ATTACHMENTS_DIR", tmp_path)
+	with TestClient(app) as client:
+		response = client.post(
+			"/api/chat/attachments",
+			data={"message": "Explain this", "preferences": "not-json"},
+			files={"file": ("notes.txt", b"study notes")},
+		)
+	assert response.status_code == 422
+	assert list(tmp_path.iterdir()) == []
+
+
+def test_vector_store_skips_malformed_rows_and_invalid_search_limits(tmp_path, monkeypatch):
+	monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
+	vector_store.STORE_FILE.write_text(json.dumps([
+		"not a document",
+		{"filename": "bad.txt", "embedding": [float("nan")]},
+		{"filename": "good.txt", "embedding": [1.0, 0.0], "text": "usable"},
+	]), encoding="utf-8")
+
+	assert [item["filename"] for item in vector_store.search([1.0, 0.0])] == ["good.txt"]
+	assert vector_store.search([1.0, 0.0], top_k=0) == []
+	with pytest.raises(ValueError, match="minimum_score"):
+		retriever.retrieve("query", minimum_score=float("nan"))
+
+
+def test_embedding_rejects_blank_text_without_loading_model(monkeypatch):
+	monkeypatch.setattr(embeddings, "get_embedding_model", lambda: pytest.fail("model should not load"))
+	with pytest.raises(ValueError, match="cannot be blank"):
+		embeddings.create_embedding("   ")
+
+
+def test_document_service_rejects_unsafe_and_missing_names(tmp_path, monkeypatch):
+	monkeypatch.setattr(document_service, "DOCUMENTS_DIR", tmp_path)
+	assert document_service.ingest_document_by_name("../outside.txt")["success"] is False
+	assert document_service.ingest_document_by_name("missing.txt") == {
+		"success": False,
+		"error": "Document does not exist.",
+	}
 
 
 def test_chat_forwards_selected_document_to_existing_agent(tmp_path, monkeypatch):
