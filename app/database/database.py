@@ -19,6 +19,7 @@ if DATABASE_URL.startswith("sqlite"):
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
+    pool_pre_ping=True,
 )
 
 
@@ -41,6 +42,10 @@ def get_db():
 
     try:
         yield db
+
+    except Exception:
+        db.rollback()
+        raise
 
     finally:
         db.close()
