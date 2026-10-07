@@ -1,6 +1,10 @@
 from pathlib import Path
+import logging
 
 from app.config.settings import DATA_DIR
+
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_EXTENSIONS = {
@@ -56,6 +60,6 @@ def read_file(file_path: str) -> str:
 
         return content
 
-    except Exception as exc:
-
-        return f"File reading error: {exc}"
+    except OSError:
+        logger.exception("Could not read study file %s", path)
+        return "File reading failed. Check that the file is accessible and try again."
