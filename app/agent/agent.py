@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -10,6 +11,9 @@ from app.llm.client import ask_llm
 from app.memory.memory_manager import MemoryManager
 from app.prompts.system_prompt import SYSTEM_PROMPT
 from app.rag.retriever import retrieve
+
+
+logger = logging.getLogger(__name__)
 
 
 class VDSSAgent:
@@ -75,6 +79,7 @@ class VDSSAgent:
             try:
                 chunks = retrieve(user_message, top_k=5, filename=source_filename)
             except Exception:
+                logger.exception("Selected-document retrieval failed for %s", source_filename)
                 return "I could not retrieve the selected document. Please try again."
             evidence = "\n\n".join(chunk.get("text", "") for chunk in chunks)
             messages.append({
@@ -93,6 +98,7 @@ class VDSSAgent:
             try:
                 response = ask_llm(messages=messages, tools=self.registry.openai_tools())
             except Exception:
+                logger.exception("Language-model request failed")
                 return self._run_without_llm(user_message, db)
 
             if response is None:
@@ -172,6 +178,7 @@ class VDSSAgent:
         try:
             chunks = retrieve(user_message, top_k=5, filename=filename)
         except Exception:
+            logger.exception("Selected-document retrieval failed for %s", filename)
             return "I could not retrieve the selected document. Please try again."
         if not chunks:
             return f'I could not find relevant material for that question in "{filename}".'
