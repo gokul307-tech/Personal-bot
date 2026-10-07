@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -9,8 +11,10 @@ from app.database.database import create_tables
 
 
 def create_app() -> FastAPI:
-
-    create_tables()
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI):
+        create_tables()
+        yield
 
     application = FastAPI(
         title=APP_NAME,
@@ -19,6 +23,7 @@ def create_app() -> FastAPI:
             "AI Agent"
         ),
         version="1.0.0",
+        lifespan=lifespan,
     )
 
     @application.get("/")
