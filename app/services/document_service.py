@@ -20,6 +20,12 @@ def ingest_document_by_name(
     filename: str,
 ) -> dict:
 
+    if not filename or Path(filename).name != filename:
+        return {
+            "success": False,
+            "error": "Invalid document name.",
+        }
+
     path = (
         DOCUMENTS_DIR / filename
     ).resolve()
@@ -34,6 +40,12 @@ def ingest_document_by_name(
         return {
             "success": False,
             "error": "Invalid document path.",
+        }
+
+    if not path.is_file():
+        return {
+            "success": False,
+            "error": "Document does not exist.",
         }
 
     return ingest_document(
