@@ -1,4 +1,6 @@
 .upgrade-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.template-category{margin-top:20px;min-width:0}
+.template-category h2{margin:0 0 9px;font:700 16px Manrope}
 .upgrade-card{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:17px}
 .upgrade-card h3{margin:0 0 6px;font:700 15px Manrope}
 .upgrade-card p{color:var(--muted);font-size:12px;line-height:1.55;margin:0 0 12px}
@@ -19,12 +21,14 @@
 .upgrade-row-actions button{padding:6px 8px;border-radius:6px;background:transparent;color:var(--green);font-size:11px;font-weight:700}
 .upgrade-row-actions button:hover{background:rgba(89,133,86,.11)}
 .upgrade-empty{padding:24px 16px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:13px;text-align:center}
+.notes-layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(240px,.85fr);align-items:start;gap:14px;min-width:0}
+.notes-list-column{min-width:0}
 .upgrade-message{padding:9px 11px;border-radius:7px;background:rgba(89,133,86,.09);color:var(--muted);font-size:12px}
 .upgrade-progress{height:7px;margin:10px 0 16px;border-radius:8px;background:var(--line);overflow:hidden}
 .upgrade-progress span{display:block;height:100%;background:var(--green);transition:width .2s ease}
 .task-section{margin-top:20px}
 .task-section h2{font:700 16px Manrope;margin:0 0 9px}
-.note-detail{margin-top:14px}
+.note-detail{min-width:0;margin-top:0;overflow-wrap:anywhere}
 .settings-section{padding:15px 0;border-bottom:1px solid var(--line)}
 .settings-section h2{font:700 16px Manrope;margin:0 0 12px}
 .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
@@ -46,4 +50,4 @@
 [data-density=compact] .message-body{line-height:1.45}
 [data-show-timestamps=false] .message-time{display:none}
 .chat-attachments[hidden]{display:none}
-@media(max-width:760px){.upgrade-grid,.settings-grid{grid-template-columns:1fr}.upgrade-row{align-items:flex-start;flex-direction:column}.upgrade-row-actions{justify-content:flex-start}.chat-attachment-chip{max-width:100%}.upgrade-toolbar select{flex:1 1 140px}}
+@media(max-width:760px){.upgrade-grid,.settings-grid,.notes-layout{grid-template-columns:minmax(0,1fr)}.upgrade-row{align-items:flex-start;flex-direction:column}.upgrade-row-actions{justify-content:flex-start}.chat-attachment-chip{max-width:100%}.upgrade-toolbar select{flex:1 1 140px}}
