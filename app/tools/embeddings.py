@@ -16,6 +16,8 @@ def create_embeddings(
 
     if not texts:
         return []
+    if any(not isinstance(text, str) or not text.strip() for text in texts):
+        raise ValueError("Embedding text cannot be blank.")
 
     model = get_embedding_model()
 
@@ -24,6 +26,8 @@ def create_embeddings(
         normalize_embeddings=True,
     )
 
+    if len(embeddings) != len(texts):
+        raise RuntimeError("Embedding model returned an unexpected number of vectors.")
     return embeddings.tolist()
 
 
