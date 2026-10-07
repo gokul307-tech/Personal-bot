@@ -37,28 +37,30 @@ function renderExplore(){
 
 function renderTemplates(){
   const templates=[
-    ['Explain simply','Explain [topic] in plain language and give one example.'],
-    ["Explain like I'm a beginner","Explain [topic] from the basics, define unfamiliar terms, and use a simple example."],
-    ['2-mark answer','Write a concise 2-mark answer about [topic].'],
-    ['5-mark answer','Write a structured 5-mark answer about [topic], with key points.'],
-    ['10-mark answer','Write a detailed 10-mark answer about [topic], with headings and examples.'],
-    ['16-mark answer','Write a comprehensive 16-mark answer about [topic], with an introduction and conclusion.'],
-    ['Important points','List the most important points to remember about [topic].'],
-    ['Short revision notes','Make short revision notes for [topic] using clear headings and bullets.'],
-    ['Summary','Summarize [topic or pasted material] into its key ideas.'],
-    ['Quiz','Create a quiz about [topic] and put the answer key separately.'],
-    ['Flashcards','Create question-and-answer flashcards for [topic].'],
-    ['Compare two concepts','Compare [concept A] and [concept B] in a clear table, then explain the key difference.'],
-    ['Give an example','Give a practical example of [concept] and explain why it fits.'],
-    ['Last-minute revision','Create a last-minute revision sheet for [topic] with formulas, definitions, and likely exam points.']
+    ['Understanding','Explain simply','Understand a topic in plain language, with an example.','Explain [topic] in plain language and give one example.'],
+    ['Understanding',"Explain like I'm a beginner",'Start with the basics and define unfamiliar terms.','Explain [topic] from the basics, define unfamiliar terms, and use a simple example.'],
+    ['Understanding','Give an example','See a practical example and why it fits.','Give a practical example of [concept] and explain why it fits.'],
+    ['Exam','2-mark answer','Prepare a concise answer for a short-mark question.','Write a concise 2-mark answer about [topic].'],
+    ['Exam','5-mark answer','Build a structured answer with the key points.','Write a structured 5-mark answer about [topic], with key points.'],
+    ['Exam','10-mark answer','Develop a detailed answer with headings and examples.','Write a detailed 10-mark answer about [topic], with headings and examples.'],
+    ['Exam','16-mark answer','Organize a comprehensive answer from introduction to conclusion.','Write a comprehensive 16-mark answer about [topic], with an introduction and conclusion.'],
+    ['Revision','Important points','Review the ideas most worth remembering.','List the most important points to remember about [topic].'],
+    ['Revision','Short revision notes','Turn a topic into concise, organized notes.','Make short revision notes for [topic] using clear headings and bullets.'],
+    ['Revision','Summary','Condense a topic or source into its key ideas.','Summarize [topic or pasted material] into its key ideas.'],
+    ['Revision','Last-minute revision','Make a quick sheet of formulas, definitions, and exam points.','Create a last-minute revision sheet for [topic] with formulas, definitions, and likely exam points.'],
+    ['Practice','Quiz','Test recall with a quiz and separate answer key.','Create a quiz about [topic] and put the answer key separately.'],
+    ['Practice','Flashcards','Practice active recall with question-and-answer cards.','Create question-and-answer flashcards for [topic].'],
+    ['Comparison','Compare two concepts','See two concepts side by side and identify the key difference.','Compare [concept A] and [concept B] in a clear table, then explain the key difference.'],
+    ['Study','Study plan','Turn a subject and timeframe into a practical study plan.','Create a study plan for [subject] over [timeframe].']
   ];
-  page('Templates','Pick a starting point, then edit the prompt in chat.',`<div class="upgrade-grid">${templates.map(([title,prompt])=>`<article class="upgrade-card"><h3>${title}</h3><p>${escapeHtml(prompt)}</p><button type="button" data-template-prompt="${escapeHtml(prompt)}">Use</button></article>`).join('')}</div>`);
+  const categories=['Understanding','Exam','Revision','Practice','Comparison','Study'];
+  page('Templates','Choose a prompt to start a focused SAGE chat.',categories.map(category=>`<section class="template-category"><h2>${category}</h2><div class="upgrade-grid">${templates.filter(template=>template[0]===category).map(([,title,description,prompt])=>`<article class="upgrade-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p><button type="button" data-template-prompt="${escapeHtml(prompt)}">Use</button></article>`).join('')}</div></section>`).join(''));
   document.querySelectorAll('[data-template-prompt]').forEach(button=>button.onclick=()=>startPrompt(button.dataset.templatePrompt));
 }
 
 let selectedNote = null;
 async function renderNotes(){
-  page('Notes','Create, organize, and use your saved study notes.',`<div class="upgrade-toolbar"><button class="upgrade-action" id="note-create">New note</button><input id="note-search" type="search" placeholder="Search title, subject, or note" aria-label="Search notes"></div><div id="note-form-slot"></div><div class="upgrade-list" id="notes-list"><div class="upgrade-empty">Loading notes...</div></div><div class="upgrade-card note-detail" id="note-detail"><h3>Select a note</h3><p>Open a note to read it, edit it, or ask SAGE about it.</p></div>`);
+  page('Notes','Create, organize, and revisit your saved study notes.',`<div class="upgrade-toolbar"><button class="upgrade-action" id="note-create">New note</button><input id="note-search" type="search" placeholder="Search title, subject, or note" aria-label="Search notes"></div><div class="notes-layout"><div class="notes-list-column"><div id="note-form-slot"></div><div class="upgrade-list" id="notes-list"><div class="upgrade-empty">Loading notes...</div></div></div><div class="upgrade-card note-detail" id="note-detail"><h3>Select a note</h3><p>Open a note to read it, edit it, or ask SAGE about it.</p></div></div>`);
   $('note-create').onclick=()=>showNoteEditor();
   $('note-search').oninput=()=>renderNotesList($('note-search').value);
   await renderNotesList('');
