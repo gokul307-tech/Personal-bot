@@ -15,7 +15,7 @@ const baseRenderMessage = renderMessage;
 const baseRenderWorkspace = renderWorkspace;
 const baseRenderDocumentList = renderDocumentList;
 
-function savePreferences(){localStorage.setItem('sage-preferences',JSON.stringify(preferences));}
+function savePreferences(){try{localStorage.setItem('sage-preferences',JSON.stringify(preferences));toast('Preferences saved.');}catch(error){console.error('Could not save SAGE preferences.',error);toast('Preferences could not be saved in this browser.');}}
 function formatBytes(bytes){if(bytes<1024)return `${bytes} B`;if(bytes<1024*1024)return `${(bytes/1024).toFixed(0)} KB`;return `${(bytes/1024/1024).toFixed(1)} MB`;}
 function startPrompt(prompt){showView('chat');input.value=prompt;input.focus();input.dispatchEvent(new Event('input',{bubbles:true}));}
 
@@ -54,34 +54,46 @@ function renderTemplates(){
     ['Study','Study plan','Turn a subject and timeframe into a practical study plan.','Create a study plan for [subject] over [timeframe].']
   ];
   const categories=['Understanding','Exam','Revision','Practice','Comparison','Study'];
-  page('Templates','Choose a prompt to start a focused SAGE chat.',categories.map(category=>`<section class="template-category"><h2>${category}</h2><div class="upgrade-grid">${templates.filter(template=>template[0]===category).map(([,title,description,prompt])=>`<article class="upgrade-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p><button type="button" data-template-prompt="${escapeHtml(prompt)}">Use</button></article>`).join('')}</div></section>`).join(''));
-  document.querySelectorAll('[data-template-prompt]').forEach(button=>button.onclick=()=>startPrompt(button.dataset.templatePrompt));
+  const templateContent=query=>categories.map(category=>{
+    const matches=templates.filter(([group,title,description])=>group===category&&`${group} ${title} ${description}`.toLowerCase().includes(query));
+    return matches.length?`<section class="template-category"><h2>${category}</h2><div class="upgrade-grid">${matches.map(([,title,description,prompt])=>`<article class="upgrade-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p><button type="button" data-template-prompt="${escapeHtml(prompt)}">Use</button></article>`).join('')}</div></section>`:'';
+  }).join('')||'<div class="upgrade-empty">No templates match your search.</div>';
+  page('Templates','Choose a prompt to start a focused SAGE chat.',`<div class="upgrade-toolbar"><input id="template-search" type="search" placeholder="Search templates" aria-label="Search templates"></div><div id="template-results">${templateContent('')}</div>`);
+  const bindTemplateButtons=()=>document.querySelectorAll('[data-template-prompt]').forEach(button=>button.onclick=()=>startPrompt(button.dataset.templatePrompt));
+  bindTemplateButtons();
+  $('template-search').oninput=()=>{$('template-results').innerHTML=templateContent($('template-search').value.trim().toLowerCase());bindTemplateButtons();};
 }
 
 let selectedNote = null;
+let notesRequestSequence = 0;
+let notesSearchTimer;
 async function renderNotes(){
+  clearTimeout(notesSearchTimer);
+  notesRequestSequence++;
   page('Notes','Create, organize, and revisit your saved study notes.',`<div class="upgrade-toolbar"><button class="upgrade-action" id="note-create">New note</button><input id="note-search" type="search" placeholder="Search title, subject, or note" aria-label="Search notes"></div><div class="notes-layout"><div class="notes-list-column"><div id="note-form-slot"></div><div class="upgrade-list" id="notes-list"><div class="upgrade-empty">Loading notes...</div></div></div><div class="upgrade-card note-detail" id="note-detail"><h3>Select a note</h3><p>Open a note to read it, edit it, or ask SAGE about it.</p></div></div>`);
   $('note-create').onclick=()=>showNoteEditor();
-  $('note-search').oninput=()=>renderNotesList($('note-search').value);
+  $('note-search').oninput=()=>{clearTimeout(notesSearchTimer);notesSearchTimer=setTimeout(()=>renderNotesList($('note-search').value),180);};
   await renderNotesList('');
 }
 async function renderNotesList(query){
-  const list=$('notes-list');if(!list)return;list.innerHTML='<div class="upgrade-empty">Loading notes...</div>';
+  const list=$('notes-list');if(!list)return;const requestSequence=++notesRequestSequence;list.innerHTML='<div class="upgrade-empty">Loading notes...</div>';
   try{
     const notes=await api(`/api/notes${query?`?q=${encodeURIComponent(query)}`:''}`);
+    if(requestSequence!==notesRequestSequence||!list.isConnected)return;
+    if(selectedNote&&!notes.some(note=>note.id===selectedNote.id))viewNote(null);
     if(!notes.length){list.innerHTML=`<div class="upgrade-empty">${query?'No notes match your search.':'No notes yet. Create a note to keep useful study material here.'}</div>`;return;}
     list.innerHTML=notes.map(note=>`<article class="upgrade-row"><div class="upgrade-row-main"><strong>${escapeHtml(note.title)}</strong><small>${escapeHtml(note.subject||'General')} · ${formatDate(note.created_at)}</small><p>${escapeHtml(note.content.slice(0,180))}${note.content.length>180?'…':''}</p></div><div class="upgrade-row-actions"><button data-note-view="${note.id}">View</button><button data-note-ask="${note.id}">Ask SAGE</button><button data-note-edit="${note.id}">Edit</button><button data-note-delete="${note.id}">Delete</button></div></article>`).join('');
     list.querySelectorAll('[data-note-view]').forEach(button=>button.onclick=()=>viewNote(notes.find(note=>note.id===Number(button.dataset.noteView))));
     list.querySelectorAll('[data-note-ask]').forEach(button=>button.onclick=()=>{const note=notes.find(item=>item.id===Number(button.dataset.noteAsk));const content=note.content.slice(0,14000);startPrompt(`Use this saved note to help answer my question.\n\nNote: ${note.title}\n${content}${note.content.length>content.length?'\n[Note excerpt shortened to fit the chat message limit.]':''}\n\nQuestion: `)});
     list.querySelectorAll('[data-note-edit]').forEach(button=>button.onclick=()=>showNoteEditor(notes.find(note=>note.id===Number(button.dataset.noteEdit))));
     list.querySelectorAll('[data-note-delete]').forEach(button=>button.onclick=async()=>{if(!confirm('Delete this note?'))return;button.disabled=true;try{await api(`/api/notes/${button.dataset.noteDelete}`,{method:'DELETE'});if(selectedNote?.id===Number(button.dataset.noteDelete))selectedNote=null;toast('Note deleted.');await renderNotesList(query);if(!selectedNote)viewNote(null)}catch{button.disabled=false;toast('SAGE could not delete this note.')}});
-  }catch{list.innerHTML='<div class="upgrade-empty">Notes could not be loaded. Check your connection and try again.</div>';toast('SAGE could not load notes.');}
+  }catch{if(requestSequence===notesRequestSequence&&list.isConnected){list.innerHTML='<div class="upgrade-empty">Notes could not be loaded. Check your connection and try again.</div>';toast('SAGE could not load notes.');}}
 }
 function viewNote(note){selectedNote=note||null;const detail=$('note-detail');if(!detail)return;if(!note){detail.innerHTML='<h3>Select a note</h3><p>Open a note to read it, edit it, or ask SAGE about it.</p>';return;}detail.innerHTML=`<h3>${escapeHtml(note.title)}</h3><p>${escapeHtml(note.subject||'General')} · ${formatDate(note.created_at)}</p><p>${escapeHtml(note.content).replace(/\n/g,'<br>')}</p>`;}
 function showNoteEditor(note=null){
-  const slot=$('note-form-slot');if(!slot)return;slot.innerHTML=`<section class="upgrade-card"><h3>${note?'Edit note':'New note'}</h3><form class="upgrade-form" id="note-editor"><label>Title<input name="title" required maxlength="255" value="${escapeHtml(note?.title||'')}"></label><label>Subject<input name="subject" maxlength="100" value="${escapeHtml(note?.subject||'')}"></label><label>Note<textarea name="content" required maxlength="50000">${escapeHtml(note?.content||'')}</textarea></label><div class="upgrade-toolbar"><button class="upgrade-action">Save note</button><button type="button" class="upgrade-action secondary" id="note-cancel">Cancel</button></div></form></section>`;
+  const slot=$('note-form-slot');if(!slot)return;slot.innerHTML=`<section class="upgrade-card"><h3>${note?'Edit note':'New note'}</h3><form class="upgrade-form" id="note-editor"><label>Title<input name="title" required maxlength="255" value="${escapeHtml(note?.title||'')}"></label><label>Subject<input name="subject" maxlength="100" value="${escapeHtml(note?.subject||'')}"></label><label>Note<textarea name="content" required maxlength="50000">${escapeHtml(note?.content||'')}</textarea></label><div class="upgrade-toolbar"><button class="upgrade-action">Save note</button><button type="button" class="upgrade-action secondary" id="note-cancel">Cancel</button></div><p id="note-editor-status" role="status"></p></form></section>`;
   $('note-cancel').onclick=()=>slot.replaceChildren();
-  $('note-editor').onsubmit=async event=>{event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget));try{await api(note?`/api/notes/${note.id}`:'/api/notes',{method:note?'PATCH':'POST',body:JSON.stringify(data)});slot.replaceChildren();toast(note?'Note updated.':'Note saved.');await renderNotesList($('note-search').value);}catch{toast('SAGE could not save this note.');}};
+  $('note-editor').onsubmit=async event=>{event.preventDefault();const button=event.currentTarget.querySelector('button[type="submit"],button:not([type])');const status=$('note-editor-status');const data=Object.fromEntries(new FormData(event.currentTarget));button.disabled=true;status.textContent='Saving note...';try{await api(note?`/api/notes/${note.id}`:'/api/notes',{method:note?'PATCH':'POST',body:JSON.stringify(data)});slot.replaceChildren();toast(note?'Note updated.':'Note saved.');await renderNotesList($('note-search').value);}catch{button.disabled=false;status.textContent='Note could not be saved. Check your connection and try again.';toast('SAGE could not save this note.');}};
 }
 
 function taskSection(title,tasks){return `<section class="task-section"><h2>${title} <span class="priority-pill">${tasks.length}</span></h2>${tasks.length?`<div class="upgrade-list">${tasks.map(task=>`<article class="upgrade-row"><div class="upgrade-row-main"><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.subject||'General')} · ${task.scheduled_at?formatDate(task.scheduled_at):'No due date'} · <span class="priority-pill ${task.priority==='high'?'high':''}">${escapeHtml(task.priority||'medium')} priority</span></small><p>${escapeHtml(task.description||'')}</p></div><div class="upgrade-row-actions"><button data-task-complete="${task.id}">${task.completed?'Reopen':'Complete'}</button><button data-task-edit="${task.id}">Edit</button><button data-task-delete="${task.id}">Delete</button></div></article>`).join('')}</div>`:'<div class="upgrade-empty">Nothing here yet.</div>'}</section>`;}
