@@ -21,7 +21,7 @@ def _load_store() -> list[dict[str, Any]]:
             data = json.load(file)
 
         if isinstance(data, list):
-            return data
+            return [item for item in data if isinstance(item, dict)]
 
         return []
 
@@ -95,6 +95,9 @@ def cosine_similarity(
     if not first or not second:
         return 0.0
 
+    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in first + second):
+        return 0.0
+
     if len(first) != len(second):
         return 0.0
 
@@ -125,6 +128,11 @@ def search(
     filename: str | None = None,
 ) -> list[dict[str, Any]]:
 
+    if top_k <= 0 or not query_embedding:
+        return []
+    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in query_embedding):
+        return []
+
     documents = _load_store()
 
     scored = []
@@ -139,7 +147,9 @@ def search(
 
         embedding = document.get("embedding")
 
-        if not embedding:
+        if not isinstance(embedding, list) or not embedding:
+            continue
+        if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in embedding):
             continue
 
         score = cosine_similarity(
