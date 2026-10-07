@@ -1,7 +1,11 @@
 import json
+import logging
 from typing import Any
 
 from app.agent.registry import ToolRegistry
+
+
+logger = logging.getLogger(__name__)
 
 
 class ToolExecutor:
@@ -63,6 +67,7 @@ class ToolExecutor:
                 "error": f"Invalid arguments for '{name}': {exc}",
             }
         except Exception as exc:
+            logger.exception("Tool '%s' raised an unexpected error", name)
             return {
                 "success": False,
                 "error": f"Tool '{name}' failed: {exc}",
