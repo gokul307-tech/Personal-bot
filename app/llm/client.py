@@ -36,4 +36,6 @@ def ask_llm(
         kwargs["tool_choice"] = "auto"
 
     response = client.chat.completions.create(**kwargs)
+    if not response.choices or response.choices[0].message is None:
+        raise RuntimeError("OpenRouter returned no assistant response.")
     return response.choices[0].message
