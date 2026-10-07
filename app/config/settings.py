@@ -34,6 +34,17 @@ APP_NAME = os.getenv("APP_NAME", "VDSS")
 APP_ENV = os.getenv("APP_ENV", "development")
 
 
+def _read_int_setting(name: str, default: int, minimum: int = 0) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {raw_value!r}.") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {value}.")
+    return value
+
+
 # ---------------------------------------------------------
 # OpenRouter
 # ---------------------------------------------------------
@@ -65,13 +76,10 @@ EMBEDDING_MODEL = os.getenv(
     "all-MiniLM-L6-v2"
 )
 
-CHUNK_SIZE = int(
-    os.getenv("CHUNK_SIZE", "800")
-)
-
-CHUNK_OVERLAP = int(
-    os.getenv("CHUNK_OVERLAP", "120")
-)
+CHUNK_SIZE = _read_int_setting("CHUNK_SIZE", 800, minimum=1)
+CHUNK_OVERLAP = _read_int_setting("CHUNK_OVERLAP", 120)
+if CHUNK_OVERLAP >= CHUNK_SIZE:
+    raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE.")
 
 
 # ---------------------------------------------------------
