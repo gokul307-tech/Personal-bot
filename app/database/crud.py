@@ -25,7 +25,7 @@ def create_conversation(db: Session, user_id: int = 1, title: str = "New Chat"):
 
 def get_conversations(db: Session, user_id: int = 1):
     query = select(Conversation).where(Conversation.user_id == user_id)
-    return db.execute(query.order_by(Conversation.updated_at.desc())).scalars().all()
+    return db.execute(query.order_by(Conversation.updated_at.desc(), Conversation.id.desc())).scalars().all()
 
 
 def get_conversation(db: Session, conversation_id: int, user_id: int = 1):
@@ -140,7 +140,7 @@ def get_notes(
     if subject:
         query = query.where(Note.subject == subject)
 
-    query = query.order_by(Note.created_at.desc())
+    query = query.order_by(Note.created_at.desc(), Note.id.desc())
 
     return db.execute(query).scalars().all()
 
@@ -187,7 +187,7 @@ def get_marks(
     if subject:
         query = query.where(Mark.subject == subject)
 
-    query = query.order_by(Mark.created_at.desc())
+    query = query.order_by(Mark.created_at.desc(), Mark.id.desc())
 
     return db.execute(query).scalars().all()
 
@@ -234,9 +234,7 @@ def get_study_plans(
             StudyPlan.user_id == user_id
         )
 
-    query = query.order_by(
-        StudyPlan.scheduled_at.asc()
-    )
+    query = query.order_by(StudyPlan.scheduled_at.asc(), StudyPlan.id.asc())
 
     return db.execute(query).scalars().all()
 
@@ -288,6 +286,7 @@ def get_memories(
     query = query.order_by(
         Memory.importance.desc(),
         Memory.created_at.desc(),
+        Memory.id.desc(),
     )
 
     return db.execute(query).scalars().all()
