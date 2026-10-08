@@ -27,12 +27,15 @@ _ALLOWED_FUNCTIONS = {
     "round": round,
 }
 
+_MAX_RESULT_BITS = 16_384
+_MAX_EXPONENT = 1_000
+
 
 def _evaluate(node):
 
     if isinstance(node, ast.Constant):
 
-        if isinstance(node.value, (int, float)):
+        if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
 
             return node.value
 
@@ -52,10 +55,25 @@ def _evaluate(node):
         left = _evaluate(node.left)
         right = _evaluate(node.right)
 
-        return _ALLOWED_OPERATORS[operator_type](
+        if operator_type is ast.Pow:
+            if abs(right) > _MAX_EXPONENT:
+                raise ValueError("Exponent is too large.")
+            if isinstance(left, int) and isinstance(right, int) and abs(left) > 1:
+                if left.bit_length() * abs(right) > _MAX_RESULT_BITS:
+                    raise ValueError("Result is too large.")
+        elif operator_type is ast.Mult and isinstance(left, int) and isinstance(right, int):
+            if left.bit_length() + right.bit_length() > _MAX_RESULT_BITS:
+                raise ValueError("Result is too large.")
+
+        result = _ALLOWED_OPERATORS[operator_type](
             left,
             right,
         )
+        if isinstance(result, int) and result.bit_length() > _MAX_RESULT_BITS:
+            raise ValueError("Result is too large.")
+        if isinstance(result, float) and not math.isfinite(result):
+            raise ValueError("Result is not finite.")
+        return result
 
     if isinstance(node, ast.UnaryOp):
 
@@ -94,9 +112,12 @@ def _evaluate(node):
             for argument in node.args
         ]
 
-        return _ALLOWED_FUNCTIONS[
+        result = _ALLOWED_FUNCTIONS[
             function_name
         ](*arguments)
+        if isinstance(result, float) and not math.isfinite(result):
+            raise ValueError("Result is not finite.")
+        return result
 
     raise ValueError(
         "Unsupported mathematical expression."
