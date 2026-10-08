@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
 
 
@@ -8,7 +8,7 @@ class ChatRequest(BaseModel):
         min_length=1,
         max_length=20_000,
     )
-    conversation_id: int | None = None
+    conversation_id: int | None = Field(default=None, ge=1)
     source_filename: str | None = Field(default=None, max_length=255)
     preferences: "ChatPreferences" = Field(default_factory=lambda: ChatPreferences())
     auto_title: bool = True
@@ -91,6 +91,13 @@ class NoteUpdate(BaseModel):
             raise ValueError("Content cannot be blank.")
         return value
 
+    @model_validator(mode="after")
+    def reject_null_required_updates(self):
+        for field in ("title", "content"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null.")
+        return self
+
 
 class StudyPlanCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
@@ -115,6 +122,22 @@ class StudyPlanUpdate(BaseModel):
     scheduled_at: str | None = None
     completed: bool | None = None
     priority: Literal["low", "medium", "high"] | None = None
+
+    @field_validator("title")
+    @classmethod
+    def normalize_optional_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("Title cannot be blank.")
+        return value
+
+    @model_validator(mode="after")
+    def reject_null_title_update(self):
+        if "title" in self.model_fields_set and self.title is None:
+            raise ValueError("Title cannot be null.")
+        return self
 
 
 class StudyPlanRequest(BaseModel):
