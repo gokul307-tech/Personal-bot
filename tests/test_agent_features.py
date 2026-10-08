@@ -78,3 +78,41 @@ def test_llm_client_rejects_empty_provider_choices(monkeypatch):
 
     with pytest.raises(RuntimeError, match="no assistant response"):
         llm_client.ask_llm(messages=[])
+
+
+def test_tool_registry_rejects_duplicate_and_incomplete_definitions():
+    registry = ToolRegistry()
+    schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string"}},
+        "required": ["value"],
+    }
+    registry.register("echo", "Echo a value", schema, lambda value: value)
+
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register("echo", "A replacement", schema, lambda value: value)
+    with pytest.raises(ValueError, match="declared in properties"):
+        registry.register("invalid", "Invalid schema", {"type": "object", "required": ["value"]}, lambda: None)
+
+
+def test_executor_rejects_blank_required_string_arguments():
+    registry = ToolRegistry()
+    registry.register(
+        "echo",
+        "Echo a value",
+        {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+        lambda value: value,
+    )
+
+    result = ToolExecutor(registry).execute("echo", {"value": "  "})
+
+    assert result["success"] is False
+    assert "cannot be blank" in result["error"]
+
+
+def test_calculator_limits_exponent_and_non_finite_results():
+    from app.tools.calculator import calculator
+
+    assert "Exponent is too large" in calculator("2 ** 1000000")
+    assert "not finite" in calculator("1e308 * 1e308")
+    assert "Only numeric values" in calculator("True + 1")
