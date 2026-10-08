@@ -17,6 +17,23 @@ class ToolRegistry:
         function: Callable,
     ) -> None:
 
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Tool name must be a non-empty string.")
+        if name in self._tools:
+            raise ValueError(f"Tool '{name}' is already registered.")
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError("Tool description must be a non-empty string.")
+        if not callable(function):
+            raise TypeError("Tool function must be callable.")
+        if not isinstance(parameters, dict) or parameters.get("type") != "object":
+            raise ValueError("Tool parameters must be an object schema.")
+        properties = parameters.get("properties", {})
+        required = parameters.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            raise ValueError("Tool properties and required fields are invalid.")
+        if any(not isinstance(field, str) or field not in properties for field in required):
+            raise ValueError("Every required tool field must be declared in properties.")
+
         self._tools[name] = {
             "name": name,
             "description": description,
