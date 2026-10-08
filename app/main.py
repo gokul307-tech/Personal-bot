@@ -1,19 +1,30 @@
 from contextlib import asynccontextmanager
+import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from app.config.settings import BASE_DIR
+from fastapi.responses import FileResponse, JSONResponse
+from app.config.settings import BASE_DIR, validate_settings
 
 from app.api.routes import router
 from app.config.settings import APP_NAME
 from app.database.database import create_tables
 
 
+logger = logging.getLogger(__name__)
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
-        create_tables()
+        try:
+            validate_settings()
+            create_tables()
+        except Exception as exc:
+            logger.exception("SAGE startup initialization failed")
+            raise RuntimeError(
+                "SAGE could not start. Check application settings and database access."
+            ) from exc
         yield
 
     application = FastAPI(
@@ -25,6 +36,17 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    @application.exception_handler(Exception)
+    async def handle_unexpected_error(_request: Request, exc: Exception):
+        logger.error(
+            "Unhandled application error",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "SAGE encountered an unexpected error. Please try again."},
+        )
 
     @application.get("/")
     def root():
