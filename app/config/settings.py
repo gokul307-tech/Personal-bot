@@ -31,7 +31,7 @@ load_dotenv(ENV_FILE)
 # ---------------------------------------------------------
 
 APP_NAME = os.getenv("APP_NAME", "VDSS")
-APP_ENV = os.getenv("APP_ENV", "development")
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 
 
 def _read_int_setting(name: str, default: int, minimum: int = 0) -> int:
@@ -80,6 +80,18 @@ CHUNK_SIZE = _read_int_setting("CHUNK_SIZE", 800, minimum=1)
 CHUNK_OVERLAP = _read_int_setting("CHUNK_OVERLAP", 120)
 if CHUNK_OVERLAP >= CHUNK_SIZE:
     raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE.")
+
+
+def validate_settings() -> None:
+    """Fail startup early with actionable errors for invalid app settings."""
+    if not APP_NAME.strip():
+        raise ValueError("APP_NAME must not be blank.")
+    if APP_ENV not in {"development", "dev", "test", "testing", "production", "prod"}:
+        raise ValueError("APP_ENV must be development, test, or production.")
+    if not DATABASE_URL.strip():
+        raise ValueError("DATABASE_URL must not be blank.")
+    if not EMBEDDING_MODEL.strip():
+        raise ValueError("EMBEDDING_MODEL must not be blank.")
 
 
 # ---------------------------------------------------------
