@@ -8,6 +8,9 @@ class ShortTermMemory:
         max_messages: int = 20,
     ):
 
+        if isinstance(max_messages, bool) or not isinstance(max_messages, int) or max_messages < 0:
+            raise ValueError("max_messages must be a non-negative integer.")
+
         self.max_messages = max_messages
 
         self.messages: list[
@@ -27,7 +30,9 @@ class ShortTermMemory:
             }
         )
 
-        if len(self.messages) > self.max_messages:
+        if self.max_messages == 0:
+            self.messages.clear()
+        elif len(self.messages) > self.max_messages:
 
             self.messages = self.messages[
                 -self.max_messages:
