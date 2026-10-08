@@ -1,12 +1,15 @@
 import json
 import math
 from pathlib import Path
+from threading import RLock
 from typing import Any
+from uuid import uuid4
 
 from app.config.settings import VECTOR_STORE_DIR
 
 
 STORE_FILE = VECTOR_STORE_DIR / "vectors.json"
+_STORE_LOCK = RLock()
 
 
 def _load_store() -> list[dict[str, Any]]:
@@ -38,20 +41,13 @@ def _save_store(
         exist_ok=True,
     )
 
-    temporary_file = STORE_FILE.with_suffix(".tmp")
-
-    with temporary_file.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-
-        json.dump(
-            documents,
-            file,
-            ensure_ascii=False,
-        )
-
-    temporary_file.replace(STORE_FILE)
+    temporary_file = STORE_FILE.with_name(f"{STORE_FILE.name}.{uuid4().hex}.tmp")
+    try:
+        with temporary_file.open("w", encoding="utf-8") as file:
+            json.dump(documents, file, ensure_ascii=False)
+        temporary_file.replace(STORE_FILE)
+    finally:
+        temporary_file.unlink(missing_ok=True)
 
 
 def add_documents(
@@ -61,17 +57,17 @@ def add_documents(
     if not documents:
         return 0
 
-    store = _load_store()
-
-    store.extend(documents)
-
-    _save_store(store)
+    with _STORE_LOCK:
+        store = _load_store()
+        store.extend(documents)
+        _save_store(store)
 
     return len(documents)
 
 
 def clear_store() -> None:
-    _save_store([])
+    with _STORE_LOCK:
+        _save_store([])
 
 
 def get_all_documents() -> list[dict[str, Any]]:
@@ -101,25 +97,23 @@ def cosine_similarity(
     if len(first) != len(second):
         return 0.0
 
-    dot = sum(
-        a * b
-        for a, b in zip(first, second)
-    )
-
-    first_norm = math.sqrt(
-        sum(a * a for a in first)
-    )
-
-    second_norm = math.sqrt(
-        sum(b * b for b in second)
-    )
+    first_scale = max(abs(value) for value in first)
+    second_scale = max(abs(value) for value in second)
+    if first_scale == 0 or second_scale == 0:
+        return 0.0
+    first_scaled = [value / first_scale for value in first]
+    second_scaled = [value / second_scale for value in second]
+    first_norm = math.sqrt(math.fsum(value * value for value in first_scaled))
+    second_norm = math.sqrt(math.fsum(value * value for value in second_scaled))
 
     if first_norm == 0 or second_norm == 0:
         return 0.0
 
-    return dot / (
-        first_norm * second_norm
+    similarity = math.fsum(
+        (a / first_norm) * (b / second_norm)
+        for a, b in zip(first_scaled, second_scaled)
     )
+    return max(-1.0, min(1.0, similarity))
 
 
 def search(
@@ -128,7 +122,7 @@ def search(
     filename: str | None = None,
 ) -> list[dict[str, Any]]:
 
-    if top_k <= 0 or not query_embedding:
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0 or not query_embedding:
         return []
     if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in query_embedding):
         return []

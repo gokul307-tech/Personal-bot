@@ -1,4 +1,5 @@
 from functools import lru_cache
+import math
 
 from sentence_transformers import SentenceTransformer
 
@@ -28,7 +29,15 @@ def create_embeddings(
 
     if len(embeddings) != len(texts):
         raise RuntimeError("Embedding model returned an unexpected number of vectors.")
-    return embeddings.tolist()
+    vectors = embeddings.tolist()
+    if not isinstance(vectors, list) or not vectors:
+        raise RuntimeError("Embedding model returned no vectors.")
+    dimensions = len(vectors[0]) if isinstance(vectors[0], list) else 0
+    if not dimensions or any(not isinstance(vector, list) or len(vector) != dimensions for vector in vectors):
+        raise RuntimeError("Embedding model returned inconsistent vector dimensions.")
+    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for vector in vectors for value in vector):
+        raise RuntimeError("Embedding model returned non-finite vector values.")
+    return vectors
 
 
 def create_embedding(
