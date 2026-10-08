@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -298,6 +299,46 @@ def test_natural_language_study_plan_is_saved_as_daily_tasks():
 		finally:
 			for task in tasks:
 				client.delete(f"/api/study-plans/{task['id']}")
+
+
+def test_cosine_similarity_handles_large_finite_vectors():
+	score = vector_store.cosine_similarity([1e308, 1e308], [1e308, 0.0])
+
+	assert score == pytest.approx(2 ** -0.5)
+
+
+def test_vector_store_serializes_concurrent_additions(tmp_path, monkeypatch):
+	monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
+
+	def add_document(index):
+		return vector_store.add_documents([{
+			"id": str(index),
+			"filename": f"notes-{index}.txt",
+			"embedding": [1.0, 0.0],
+		}])
+
+	with ThreadPoolExecutor(max_workers=6) as executor:
+		assert sum(executor.map(add_document, range(24))) == 24
+
+	assert len(vector_store.get_all_documents()) == 24
+	assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_embedding_rejects_non_finite_model_output(monkeypatch):
+	class VectorBatch:
+		def __len__(self):
+			return 1
+
+		def tolist(self):
+			return [[1.0, float("inf")]]
+
+	class FakeModel:
+		def encode(self, _texts, **_kwargs):
+			return VectorBatch()
+
+	monkeypatch.setattr(embeddings, "get_embedding_model", lambda: FakeModel())
+	with pytest.raises(RuntimeError, match="non-finite"):
+		embeddings.create_embedding("valid input")
 
 
 def test_notes_create_edit_search_and_delete_use_existing_api():
