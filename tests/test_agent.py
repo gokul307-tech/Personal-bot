@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from app.agent.executor import ToolExecutor
 from app.agent.registry import create_default_registry
 import app.database.database as database
+from app.api.dependencies import get_agent
+from app.api.schemas import NoteUpdate
 from app.main import app, create_app
 
 
@@ -61,3 +63,44 @@ def test_executor_rejects_unknown_and_invalid_tools():
     invalid = executor.execute("calculator", '{invalid json')
     assert isinstance(invalid, dict)
     assert invalid["success"] is False
+
+def test_chat_rejects_nonpositive_conversation_ids():
+    with TestClient(app) as client:
+        response = client.post("/api/chat", json={"message": "hello", "conversation_id": 0})
+
+    assert response.status_code == 422
+
+
+def test_note_update_rejects_explicit_null_for_required_fields():
+    with pytest.raises(ValueError, match="cannot be null"):
+        NoteUpdate.model_validate({"title": None})
+
+
+def test_settings_validation_rejects_unknown_application_environment(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "APP_ENV", "staging")
+
+    with pytest.raises(ValueError, match="APP_ENV"):
+        settings.validate_settings()
+
+
+def test_chat_agent_failure_returns_friendly_error_without_exception_details():
+    class BrokenAgent:
+        def run(self, **_kwargs):
+            raise RuntimeError("provider secret detail")
+
+    with TestClient(app) as client:
+        conversation_id = client.post("/api/conversations", json={"title": "Failure test"}).json()["id"]
+        app.dependency_overrides[get_agent] = BrokenAgent
+        try:
+            response = client.post("/api/chat", json={
+                "message": "Explain a topic",
+                "conversation_id": conversation_id,
+            })
+            assert response.status_code == 503
+            assert response.json()["detail"] == "SAGE could not complete that request. Please try again."
+            assert "provider secret detail" not in response.text
+        finally:
+            app.dependency_overrides.pop(get_agent, None)
+            client.delete(f"/api/conversations/{conversation_id}")
