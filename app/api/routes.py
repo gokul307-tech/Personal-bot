@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import json
+import logging
 import mimetypes
 from pathlib import Path
 import re
@@ -36,6 +37,7 @@ from app.rag.vector_store import add_documents, delete_documents_by_filename, ge
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 USER_ID = 1
 CHAT_ATTACHMENTS_DIR = UPLOADS_DIR / "chat-attachments"
 ATTACHMENT_MARKER = "\n\n<!--sage-attachments:"
@@ -106,13 +108,27 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
             {"role": item.role, "content": _message_text(item.content)}
             for item in stored_messages[-20:]
         ]
-        response = agent.run(
-            user_message=request.message,
-            db=db,
-            conversation_messages=context,
-            source_filename=request.source_filename,
-            preferences=request.preferences.model_dump(),
-        )
+        try:
+            response = agent.run(
+                user_message=request.message,
+                db=db,
+                conversation_messages=context,
+                source_filename=request.source_filename,
+                preferences=request.preferences.model_dump(),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("SAGE agent failed for conversation %s", conversation.id)
+            raise HTTPException(
+                status_code=503,
+                detail="SAGE could not complete that request. Please try again.",
+            ) from exc
+        if not isinstance(response, str) or not response.strip():
+            raise HTTPException(
+                status_code=503,
+                detail="SAGE returned an empty response. Please try again.",
+            )
         crud.add_message(db, conversation.id, "assistant", response)
         if request.auto_title and conversation.title == "New Chat":
             conversation.title = request.message.strip().splitlines()[0][:60]
@@ -181,13 +197,27 @@ async def chat_with_attachment(
             {"role": item.role, "content": _message_text(item.content)}
             for item in crud.get_messages(db, conversation.id)[-20:]
         ]
-        response = agent.run(
-            user_message=message,
-            db=db,
-            conversation_messages=context,
-            source_filename=source_filename,
-            preferences=chat_preferences.model_dump(),
-        )
+        try:
+            response = agent.run(
+                user_message=message,
+                db=db,
+                conversation_messages=context,
+                source_filename=source_filename,
+                preferences=chat_preferences.model_dump(),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("SAGE attachment response failed for conversation %s", conversation.id)
+            raise HTTPException(
+                status_code=503,
+                detail="SAGE could not complete that request. Please try again.",
+            ) from exc
+        if not isinstance(response, str) or not response.strip():
+            raise HTTPException(
+                status_code=503,
+                detail="SAGE returned an empty response. Please try again.",
+            )
         crud.add_message(db, conversation.id, "assistant", response)
         if auto_title and conversation.title == "New Chat":
             conversation.title = message.strip().splitlines()[0][:60]
