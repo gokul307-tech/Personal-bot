@@ -3,7 +3,7 @@ from zipfile import BadZipFile, ZipFile
 from xml.etree import ElementTree
 
 from app.tools.file_reader import read_file
-from app.tools.pdf_reader import read_pdf
+from app.tools.pdf_reader import read_pdf, read_pdf_pages
 
 
 SUPPORTED_TEXT_EXTENSIONS = {
@@ -47,3 +47,12 @@ def load_document(file_path: str) -> str:
     raise ValueError(
         f"Unsupported document type: {path.suffix}"
     )
+
+
+def load_document_pages(file_path: str) -> list[dict[str, str | int | None]]:
+    path = Path(file_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Document not found: {path}")
+    if path.suffix.lower() == ".pdf":
+        return read_pdf_pages(str(path))
+    return [{"page_number": None, "text": load_document(str(path))}]
