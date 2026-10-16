@@ -40,3 +40,22 @@ def chunk_text(
         start += step
 
     return chunks
+
+
+def chunk_document_pages(
+    pages: list[dict],
+    chunk_size: int = 800,
+    chunk_overlap: int = 120,
+) -> list[dict]:
+    chunks = []
+    for page in pages:
+        text = page.get("text", "")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        page_number = page.get("page_number")
+        for text_chunk in chunk_text(text, chunk_size, chunk_overlap):
+            chunks.append({
+                "text": text_chunk,
+                "page_number": page_number,
+            })
+    return chunks
