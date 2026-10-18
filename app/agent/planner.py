@@ -50,6 +50,20 @@ class AgentPlanner:
             "tasks": tasks,
         }
 
+    def fast_path(self, user_message: str) -> dict | None:
+        """Return a minimal plan for direct questions that need no tools."""
+        text = user_message.strip().lower()
+        if not text or self.infer_tool(text) is not None:
+            return None
+        if any(f"{marks} mark" in text or f"{marks}-mark" in text for marks in ("2", "5", "10", "16")):
+            return None
+        return {
+            "intent": "conversation",
+            "requires_tools": False,
+            "exam_mode": None,
+            "tasks": [],
+        }
+
     def infer_tool(self, user_message: str) -> str | None:
         text = user_message.lower().strip()
         if not text:

@@ -2,13 +2,15 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from app.agent.agent import VDSSAgent
 from app.agent.registry import ToolRegistry
 from app.main import app
 from app.rag import retriever, vector_store
-from app.rag.document_loader import load_document
+from app.rag.document_loader import load_document, load_document_pages
 from app.tools import file_reader
 from app.tools import rag as rag_tools
 import app.api.routes as routes
@@ -17,6 +19,7 @@ from app.database import crud
 from app.database.database import SessionLocal
 from app.services import document_service
 from app.tools import embeddings
+from app.tools import pdf_reader
 
 
 def test_retriever_limits_results_to_selected_filename(tmp_path, monkeypatch):
@@ -72,7 +75,7 @@ def test_selected_document_agent_uses_filtered_retrieval(monkeypatch):
 	monkeypatch.setattr(
 		"app.agent.agent.retrieve",
 		lambda query, top_k, filename: calls.append((query, filename)) or [
-			{"text": "Deadlock is a condition where processes wait indefinitely."}
+			{"text": "Deadlock is a condition where processes wait indefinitely.", "page_number": 2}
 		],
 	)
 	agent = VDSSAgent(ToolRegistry())
@@ -82,6 +85,73 @@ def test_selected_document_agent_uses_filtered_retrieval(monkeypatch):
 
 	assert calls == [("Explain deadlock", "os.pdf")]
 	assert "Deadlock is a condition" in response
+	assert "Page 2" in response
+
+
+def _write_text_pdf(path, page_texts):
+	writer = PdfWriter()
+	for text in page_texts:
+		page = writer.add_blank_page(width=612, height=792)
+		font = DictionaryObject({
+			NameObject("/Type"): NameObject("/Font"),
+			NameObject("/Subtype"): NameObject("/Type1"),
+			NameObject("/BaseFont"): NameObject("/Helvetica"),
+		})
+		font_ref = writer._add_object(font)
+		page[NameObject("/Resources")] = DictionaryObject({
+			NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref}),
+		})
+		stream = DecodedStreamObject()
+		stream.set_data(f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("ascii"))
+		page[NameObject("/Contents")] = writer._add_object(stream)
+	with path.open("wb") as output:
+		writer.write(output)
+
+
+def test_pdf_ingestion_preserves_all_page_numbers_and_chunks(tmp_path, monkeypatch):
+	monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
+	monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
+	path = tmp_path / "study.pdf"
+	_write_text_pdf(path, [
+		"First page definition",
+		"Program listing def print_statement_x9",
+		"Third page conclusion",
+	])
+	monkeypatch.setattr(rag_tools, "create_embeddings", lambda texts: [[1.0, 0.0] for _ in texts])
+
+	result = rag_tools.ingest_document(str(path))
+	documents = vector_store.get_all_documents()
+
+	assert result["success"] is True
+	assert result["pages_processed"] == 3
+	assert {item["page_number"] for item in documents} == {1, 2, 3}
+	assert any("print_statement_x9" in item["text"] and item["page_number"] == 2 for item in documents)
+
+
+def test_retriever_uses_page_filter_and_exact_program_text(tmp_path, monkeypatch):
+	monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
+	monkeypatch.setattr(retriever, "create_embedding", lambda _query: (_ for _ in ()).throw(RuntimeError("offline")))
+	vector_store.add_documents([
+		{"id": "p1", "filename": "programs.pdf", "page_number": 1, "text": "Overview of algorithms", "embedding": [1.0, 0.0]},
+		{"id": "p2", "filename": "programs.pdf", "page_number": 2, "text": "Program listing def print_statement_x9", "embedding": [0.0, 1.0]},
+	])
+
+	page_results = retriever.retrieve("find the program on page 2", filename="programs.pdf")
+	code_results = retriever.retrieve("print_statement_x9", filename="programs.pdf")
+
+	assert page_results and {item["page_number"] for item in page_results} == {2}
+	assert code_results and code_results[0]["page_number"] == 2
+
+
+def test_document_retrieval_miss_does_not_claim_content_is_absent(monkeypatch):
+	monkeypatch.setattr("app.agent.agent.retrieve", lambda *_args, **_kwargs: [])
+	agent = VDSSAgent(ToolRegistry())
+	monkeypatch.setattr(agent, "_llm_available", lambda: False)
+
+	response = agent.run("Find the source program", source_filename="programs.pdf")
+
+	assert "does not confirm" in response
+	assert "did not contain" not in response
 
 
 def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatch):

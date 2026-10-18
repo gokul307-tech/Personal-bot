@@ -211,15 +211,15 @@ $('file-input').onchange=event=>{
 sendMessage=async function(text){
   if(!pendingAttachment)return baseSendMessage(text);
   if(state.loading||!text.trim()){if(!text.trim())toast('Add a question before sending the attachment.');return;}
-  const file=pendingAttachment;state.loading=true;state.abort=new AbortController();$('stop-btn').hidden=false;$('welcome').hidden=true;
+  const file=pendingAttachment;const useCenteredLoader=!messages.querySelector('.message');state.loading=true;state.abort=new AbortController();$('stop-btn').hidden=false;$('welcome').hidden=true;showCenteredLoader(useCenteredLoader);
   renderMessage({role:'user',content:text,created_at:Date.now(),attachments:[{filename:file.name,file_type:file.name.split('.').pop(),size:file.size}]});
-  const waiting=document.createElement('article');waiting.className='message assistant';waiting.innerHTML='<div class="message-avatar"><img src="/assets/sage-logo.png" alt="SAGE"></div><div class="message-body typing">Reading attachment and preparing an answer...</div>';messages.appendChild(waiting);
+  const waiting=useCenteredLoader?null:createLoadingMessage('Reading attachment and preparing an answer...');if(waiting)messages.appendChild(waiting);
   renderAttachmentPreview('Processing...');input.value='';input.style.height='auto';
   const form=new FormData();form.append('message',text);form.append('file',file);if(state.activeId)form.append('conversation_id',state.activeId);form.append('preferences',JSON.stringify(agentPreferences()));form.append('auto_title',String(preferences.autoTitles));
   try{
-    const result=await api('/api/chat/attachments',{method:'POST',body:form,signal:state.abort.signal});state.activeId=result.conversation_id;waiting.remove();renderMessage({role:'assistant',content:result.response,created_at:Date.now()});const detail=await api(`/api/conversations/${state.activeId}`);$('conversation-title').textContent=detail.title;pendingAttachment=null;$('file-input').value='';renderAttachmentPreview();await loadHistory();messages.scrollTop=messages.scrollHeight;
-  }catch(error){waiting.remove();if(error.name!=='AbortError')toast('SAGE could not process this attachment. Try again.');renderAttachmentPreview('Not sent');}
-  finally{state.loading=false;state.abort=null;$('stop-btn').hidden=true;input.focus();}
+    const result=await api('/api/chat/attachments',{method:'POST',body:form,signal:state.abort.signal});state.activeId=result.conversation_id;clearLoadingIndicators();renderMessage({role:'assistant',content:result.response,created_at:Date.now()});const detail=await api(`/api/conversations/${state.activeId}`);$('conversation-title').textContent=detail.title;pendingAttachment=null;$('file-input').value='';renderAttachmentPreview();await loadHistory();messages.scrollTop=messages.scrollHeight;
+  }catch(error){clearLoadingIndicators();if(error.name!=='AbortError')toast('SAGE could not process this attachment. Try again.');renderAttachmentPreview('Not sent');}
+  finally{clearLoadingIndicators();state.loading=false;state.abort=null;$('stop-btn').hidden=true;input.focus();}
 };
 $('composer').onsubmit=event=>{event.preventDefault();sendMessage(input.value);};
 

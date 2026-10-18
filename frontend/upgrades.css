@@ -35,6 +35,27 @@
 .setting-control{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;color:var(--muted);font-size:12px}
 .setting-control input[type=checkbox]{accent-color:var(--green);width:16px;height:16px}
 .setting-control select{width:min(180px,55%)}
+:root{color-scheme:light}[data-theme=dark]{color-scheme:dark}
+.settings-section select,.settings-section input:not([type=checkbox]){min-width:0;min-height:38px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--white);color:var(--ink);font:inherit;transition:border-color .15s ease,box-shadow .15s ease}
+.settings-section input:not([type=checkbox]){width:100%;max-width:360px}
+.setting-control select{min-height:38px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--white);color:var(--ink);font:inherit}
+.setting-control input[type=checkbox]{flex:0 0 18px;width:18px;height:18px;margin:0;cursor:pointer}
+.settings-section select:focus-visible,.settings-section input:focus-visible,.setting-control input[type=checkbox]:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.settings-section button{min-height:34px;padding:7px 11px;border:1px solid var(--line);border-radius:7px;background:var(--green);color:var(--beige);font:600 12px 'DM Sans',sans-serif;transition:filter .15s ease,transform .15s ease}
+.settings-section button:hover:not(:disabled){filter:brightness(1.05);transform:translateY(-1px)}
+.settings-section button:disabled{cursor:wait;opacity:.65}
+#document-search,.settings-section select,.setting-control select{border:1px solid var(--green);border-radius:8px;background-color:var(--green);color:var(--beige);caret-color:var(--beige);box-shadow:none}
+#document-search::placeholder{color:rgba(237,232,208,.82)}
+#document-search:focus,.settings-section select:focus-visible,.setting-control select:focus-visible{border-color:var(--green);box-shadow:0 0 0 2px rgba(89,133,86,.24);outline:0}
+.settings-section select,.setting-control select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--beige) 50%),linear-gradient(135deg,var(--beige) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-repeat:no-repeat;background-size:5px 5px,5px 5px;padding-right:28px}
+.settings-section select option,.setting-control select option{background:var(--green);color:var(--beige)}
+.message-avatar{display:grid;place-items:center;overflow:hidden}
+.message-avatar img{display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:30px;object-fit:contain;object-position:center;flex:0 0 auto;margin:auto}
+.message-actions{display:flex;align-items:center;gap:6px;margin-top:7px}
+.message-actions button{min-height:26px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--muted);font:600 11px 'DM Sans',sans-serif;line-height:1.2;transition:background .15s ease,color .15s ease,border-color .15s ease}
+.message-actions button:hover:not(:disabled){border-color:var(--green);background:rgba(89,133,86,.11);color:var(--green)}
+.message-actions button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.message-actions button:disabled{cursor:wait;opacity:.65}
 .chat-attachments{display:flex;gap:8px;margin:0 0 8px;min-width:0}
 .chat-attachment-chip,.message-attachment-chip{display:flex;align-items:center;gap:8px;max-width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:11px;color:var(--ink)}
 .chat-attachment-chip>span,.message-attachment-chip>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -26,6 +26,29 @@ def test_planner_classifies_exam_and_calculator_intent():
     assert plan["subject"] == "OS"
 
 
+def test_planner_fast_path_only_applies_to_direct_questions():
+    planner = AgentPlanner()
+
+    assert planner.fast_path("Explain recursion simply.")["requires_tools"] is False
+    assert planner.fast_path("Calculate 25 * 4.") is None
+    assert planner.fast_path("Give me a 5-mark answer on OS.") is None
+
+
+def test_simple_llm_request_omits_unneeded_tool_schema(monkeypatch):
+    captured = {}
+
+    def fake_llm(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(content="A direct answer.", tool_calls=[])
+
+    agent = VDSSAgent(create_default_registry())
+    monkeypatch.setattr(agent, "_llm_available", lambda: True)
+    monkeypatch.setattr("app.agent.agent.ask_llm", fake_llm)
+
+    assert agent.run("Explain recursion simply.") == "A direct answer."
+    assert captured["tools"] is None
+
+
 def test_deterministic_calculator_path_returns_natural_result():
     agent = VDSSAgent(create_default_registry())
     result = agent.run("Calculate 25% of 480.")
@@ -116,3 +139,16 @@ def test_calculator_limits_exponent_and_non_finite_results():
     assert "Exponent is too large" in calculator("2 ** 1000000")
     assert "not finite" in calculator("1e308 * 1e308")
     assert "Only numeric values" in calculator("True + 1")
+
+
+def test_document_tool_formatter_cites_pages_and_avoids_absence_claims():
+    answer = VDSSAgent._format_tool_result("search_knowledge", [{
+        "page_number": 4,
+        "text": "def print_statement_x9(): return 42",
+    }])
+    missing = VDSSAgent._format_tool_result("search_knowledge", [])
+
+    assert "Page 4" in answer
+    assert "print_statement_x9" in answer
+    assert "does not confirm" in missing
+    assert "did not contain" not in missing

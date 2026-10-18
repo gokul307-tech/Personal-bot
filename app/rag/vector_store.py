@@ -1,6 +1,7 @@
 import json
 import math
 from pathlib import Path
+import re
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -10,6 +11,10 @@ from app.config.settings import VECTOR_STORE_DIR
 
 STORE_FILE = VECTOR_STORE_DIR / "vectors.json"
 _STORE_LOCK = RLock()
+_QUERY_STOP_WORDS = {
+    "a", "an", "and", "are", "for", "from", "find", "in", "is", "me",
+    "of", "on", "or", "the", "to", "what", "where", "which", "with",
+}
 
 
 def _load_store() -> list[dict[str, Any]]:
@@ -121,11 +126,16 @@ def search(
     query_embedding: list[float],
     top_k: int = 5,
     filename: str | None = None,
+    query_text: str | None = None,
+    page_number: int | None = None,
 ) -> list[dict[str, Any]]:
 
-    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0 or not query_embedding:
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
         return []
     if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in query_embedding):
+        return []
+    query_tokens = set(re.findall(r"[a-z_][a-z0-9_]*", (query_text or "").casefold())) - _QUERY_STOP_WORDS
+    if not query_embedding and not query_tokens and page_number is None:
         return []
 
     documents = _load_store()
@@ -139,21 +149,34 @@ def search(
 
         if filename and document.get("filename") != filename:
             continue
+        if page_number is not None and document.get("page_number") != page_number:
+            continue
 
         embedding = document.get("embedding")
+        semantic_score = 0.0
+        if (
+            query_embedding
+            and isinstance(embedding, list)
+            and embedding
+            and all(isinstance(value, (int, float)) and math.isfinite(value) for value in embedding)
+        ):
+            semantic_score = cosine_similarity(query_embedding, embedding)
 
-        if not isinstance(embedding, list) or not embedding:
-            continue
-        if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in embedding):
-            continue
+        lexical_score = 0.0
+        if query_tokens:
+            text_tokens = set(re.findall(r"[a-z_][a-z0-9_]*", str(document.get("text", "")).casefold()))
+            lexical_score = len(query_tokens & text_tokens) / len(query_tokens)
+        elif page_number is not None:
+            lexical_score = 1.0
 
-        score = cosine_similarity(
-            query_embedding,
-            embedding,
-        )
+        score = max(semantic_score, lexical_score * 0.7)
+        if score <= 0:
+            continue
 
         item = dict(document)
         item["score"] = score
+        item["semantic_score"] = semantic_score
+        item["lexical_score"] = lexical_score
 
         scored.append(item)
 

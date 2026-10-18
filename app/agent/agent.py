@@ -39,7 +39,8 @@ class VDSSAgent:
         preferences: dict[str, Any] | None = None,
     ) -> str:
 
-        plan = self.planner.plan(user_message)
+        plan = None if source_filename else self.planner.fast_path(user_message)
+        plan = plan or self.planner.plan(user_message)
         self.memory.add_message(role="user", content=user_message)
 
         if not self._llm_available():
@@ -109,7 +110,8 @@ class VDSSAgent:
 
         for _ in range(self.max_tool_iterations):
             try:
-                response = ask_llm(messages=messages, tools=self.registry.openai_tools())
+                tools = self.registry.openai_tools() if plan.get("requires_tools") or source_filename else None
+                response = ask_llm(messages=messages, tools=tools)
             except Exception:
                 logger.exception("Language-model request failed")
                 return self._run_without_llm(user_message, db)
