@@ -10,7 +10,7 @@ from app.config.settings import (
 from app.rag.chunker import chunk_document_pages
 from app.rag.document_loader import load_document_pages
 from app.rag.retriever import retrieve
-from app.rag.vector_store import add_documents
+from app.rag.vector_store import add_documents, delete_documents_by_filename, get_all_documents
 from app.tools.embeddings import create_embeddings
 
 
@@ -68,8 +68,21 @@ def ingest_document(
                 }
             )
 
-        count = add_documents(documents)
+        previous_documents = [
+            item for item in get_all_documents()
+            if item.get("filename") == path.name
+        ]
+        delete_documents_by_filename(path.name)
+        try:
+            count = add_documents(documents)
+        except Exception:
+            if previous_documents:
+                add_documents(previous_documents)
+            raise
         if count != len(documents):
+            delete_documents_by_filename(path.name)
+            if previous_documents:
+                add_documents(previous_documents)
             raise RuntimeError("Vector-store count did not match document chunks.")
 
         return {

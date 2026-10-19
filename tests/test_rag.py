@@ -70,6 +70,22 @@ def test_ingestion_uses_existing_loader_chunker_and_vector_store(tmp_path, monke
 	assert "deadlock" in stored[0]["text"]
 
 
+def test_ingestion_replaces_existing_filename_chunks(tmp_path, monkeypatch):
+	monkeypatch.setattr(file_reader, "DATA_DIR", tmp_path)
+	monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
+	path = tmp_path / "repeat.txt"
+	path.write_text("The first indexed version.", encoding="utf-8")
+	monkeypatch.setattr(rag_tools, "create_embeddings", lambda texts: [[1.0, 0.0] for _ in texts])
+
+	assert rag_tools.ingest_document(str(path))["success"] is True
+	path.write_text("The replacement indexed version.", encoding="utf-8")
+	assert rag_tools.ingest_document(str(path))["success"] is True
+
+	documents = vector_store.get_all_documents()
+	assert len(documents) == 1
+	assert documents[0]["text"] == "The replacement indexed version."
+
+
 def test_selected_document_agent_uses_filtered_retrieval(monkeypatch):
 	calls = []
 	monkeypatch.setattr(
