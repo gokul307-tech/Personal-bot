@@ -104,6 +104,52 @@ def test_selected_document_agent_uses_filtered_retrieval(monkeypatch):
 	assert "Page 2" in response
 
 
+def test_selected_document_llm_failure_returns_retrieved_evidence(monkeypatch):
+	monkeypatch.setattr(
+		"app.agent.agent.retrieve",
+		lambda *_args, **_kwargs: [{"text": "The uploaded notes define orbital resonance.", "page_number": 4}],
+	)
+	agent = VDSSAgent(ToolRegistry())
+	monkeypatch.setattr(agent, "_llm_available", lambda: True)
+	monkeypatch.setattr(agent.planner, "plan", lambda _message: {"requires_tools": False})
+	monkeypatch.setattr("app.agent.agent.ask_llm", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")))
+	monkeypatch.setattr(agent, "_run_without_llm", lambda *_args: "Unrelated general answer")
+
+	response = agent.run("Explain orbital resonance", source_filename="notes.pdf")
+
+	assert "The uploaded notes define orbital resonance." in response
+	assert "Page 4" in response
+	assert "Unrelated general answer" not in response
+
+
+def test_selected_document_llm_receives_page_labeled_evidence(monkeypatch):
+	captured = {}
+
+	class Response:
+		content = "The notes define orbital resonance as a repeating alignment. (Page 4)"
+		tool_calls = []
+
+	monkeypatch.setattr(
+		"app.agent.agent.retrieve",
+		lambda *_args, **_kwargs: [{"text": "Orbital resonance is a repeating alignment.", "page_number": 4}],
+	)
+	monkeypatch.setattr("app.agent.agent.ask_llm", lambda **kwargs: captured.update(kwargs) or Response())
+	agent = VDSSAgent(ToolRegistry())
+	monkeypatch.setattr(agent, "_llm_available", lambda: True)
+	monkeypatch.setattr(agent.planner, "plan", lambda _message: {"requires_tools": False})
+
+	answer = agent.run("What is orbital resonance?", source_filename="notes.pdf")
+	evidence_message = next(
+		item["content"] for item in captured["messages"]
+		if "Retrieved excerpts:" in item.get("content", "")
+	)
+
+	assert "[Page 4]" in evidence_message
+	assert "Orbital resonance is a repeating alignment." in evidence_message
+	assert "Page 4" in answer
+	assert captured["tools"] is None
+
+
 def _write_text_pdf(path, page_texts):
 	writer = PdfWriter()
 	for text in page_texts:
@@ -131,7 +177,7 @@ def test_pdf_ingestion_preserves_all_page_numbers_and_chunks(tmp_path, monkeypat
 	_write_text_pdf(path, [
 		"First page definition",
 		"Program listing def print_statement_x9",
-		"Third page conclusion",
+		"Third page conclusion laterpage_x9",
 	])
 	monkeypatch.setattr(rag_tools, "create_embeddings", lambda texts: [[1.0, 0.0] for _ in texts])
 
@@ -142,6 +188,48 @@ def test_pdf_ingestion_preserves_all_page_numbers_and_chunks(tmp_path, monkeypat
 	assert result["pages_processed"] == 3
 	assert {item["page_number"] for item in documents} == {1, 2, 3}
 	assert any("print_statement_x9" in item["text"] and item["page_number"] == 2 for item in documents)
+	monkeypatch.setattr(retriever, "create_embedding", lambda _query: [])
+	later_page = retriever.retrieve("What is laterpage_x9 on page 3?", filename="study.pdf")
+	assert later_page and later_page[0]["page_number"] == 3
+	assert "laterpage_x9" in later_page[0]["text"]
+
+	agent = VDSSAgent(ToolRegistry())
+	monkeypatch.setattr(agent, "_llm_available", lambda: False)
+	answer = agent.run("What is laterpage_x9 on page 3?", source_filename="study.pdf")
+	assert "Page 3" in answer
+	assert "laterpage_x9" in answer
+
+
+def test_pdf_reader_reports_unreadable_pdf_types(tmp_path, monkeypatch):
+	monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
+
+	malformed = tmp_path / "malformed.pdf"
+	malformed.write_bytes(b"not a pdf")
+	with pytest.raises(ValueError, match="malformed or unreadable"):
+		pdf_reader.read_pdf_pages(str(malformed))
+
+	encrypted = tmp_path / "encrypted.pdf"
+	writer = PdfWriter()
+	writer.add_blank_page(width=612, height=792)
+	writer.encrypt("secret")
+	with encrypted.open("wb") as output:
+		writer.write(output)
+	with pytest.raises(ValueError, match="password-protected"):
+		pdf_reader.read_pdf_pages(str(encrypted))
+
+	empty = tmp_path / "empty.pdf"
+	with empty.open("wb") as output:
+		PdfWriter().write(output)
+	with pytest.raises(ValueError, match="no pages"):
+		pdf_reader.read_pdf_pages(str(empty))
+
+	scanned = tmp_path / "scanned.pdf"
+	writer = PdfWriter()
+	writer.add_blank_page(width=612, height=792)
+	with scanned.open("wb") as output:
+		writer.write(output)
+	with pytest.raises(ValueError, match="scanned; OCR is not available"):
+		pdf_reader.read_pdf_pages(str(scanned))
 
 
 def test_retriever_uses_page_filter_and_exact_program_text(tmp_path, monkeypatch):
@@ -182,7 +270,8 @@ def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatc
 		assert uploaded.status_code == 200
 		assert uploaded.json()["status"] == "ready"
 
-		listed = client.get("/api/documents").json()
+		listed = client.get("/api/documents?q=ready.txt").json()
+		assert len(listed) == 1
 		assert listed[0]["filename"] == "ready.txt"
 		assert listed[0]["status"] == "ready"
 		assert listed[0]["file_type"] == "txt"
@@ -190,16 +279,24 @@ def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatc
 		assert opened.status_code == 200
 		assert opened.content == b"study text"
 
+		replaced = client.post("/api/documents", files={"file": ("ready.txt", b"updated study text")})
+		assert replaced.status_code == 200
+		assert (tmp_path / "ready.txt").read_bytes() == b"updated study text"
+		assert len(client.get("/api/documents?q=ready.txt").json()) == 1
+
 		monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": False, "error": "internal detail"})
 		failed = client.post("/api/documents", files={"file": ("failed.txt", b"bad document")})
 		assert failed.status_code == 422
-		assert failed.json()["detail"] == "Could not process this document"
+		assert failed.json()["detail"] == "internal detail"
+		assert not (tmp_path / "failed.txt").exists()
 
 		removed = client.delete("/api/documents/ready.txt")
 		assert removed.status_code == 200
 		assert not (tmp_path / "ready.txt").exists()
 		assert deleted[-1] == "ready.txt"
-		assert deleted.count("ready.txt") == 2
+		assert deleted.count("ready.txt") == 3
+		repeated = client.delete("/api/documents/ready.txt")
+		assert repeated.status_code == 200
 
 		unsupported = client.post("/api/documents", files={"file": ("bad.exe", b"no")})
 		assert unsupported.status_code == 400
@@ -242,6 +339,38 @@ def test_attachment_chat_rejects_invalid_preferences_before_writing_files(tmp_pa
 		)
 	assert response.status_code == 422
 	assert list(tmp_path.iterdir()) == []
+
+
+def test_attachment_upload_returns_actionable_ingestion_error(tmp_path, monkeypatch):
+	monkeypatch.setattr(routes, "CHAT_ATTACHMENTS_DIR", tmp_path / "chat-attachments")
+	monkeypatch.setattr(
+		routes,
+		"ingest_document",
+		lambda *_args, **_kwargs: {
+			"success": False,
+			"error": "No selectable text was found. The PDF may be scanned; OCR is not available.",
+		},
+	)
+	db = SessionLocal()
+	conversation = crud.create_conversation(db, user_id=1, title="Failed upload test")
+	conversation_id = conversation.id
+	db.close()
+	try:
+		with TestClient(app) as client:
+			response = client.post(
+				"/api/chat/attachments",
+				data={"message": "Summarize this PDF", "conversation_id": conversation_id},
+				files={"file": ("scan.pdf", b"pdf bytes")},
+			)
+		assert response.status_code == 422
+		assert response.json()["detail"] == (
+			"No selectable text was found. The PDF may be scanned; OCR is not available."
+		)
+		assert list((tmp_path / "chat-attachments").rglob("*.pdf")) == []
+	finally:
+		db = SessionLocal()
+		crud.delete_conversation(db, conversation_id, user_id=1)
+		db.close()
 
 
 def test_vector_store_skips_malformed_rows_and_invalid_search_limits(tmp_path, monkeypatch):
@@ -308,7 +437,18 @@ def test_chat_forwards_selected_document_to_existing_agent(tmp_path, monkeypatch
 def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monkeypatch):
 	monkeypatch.setattr(routes, "CHAT_ATTACHMENTS_DIR", tmp_path / "chat-attachments")
 	ingested = []
-	monkeypatch.setattr(routes, "ingest_document", lambda path, **kwargs: ingested.append((path, kwargs)) or {"success": True, "chunks_added": 1})
+	indexed = []
+	monkeypatch.setattr(routes, "get_all_documents", lambda: [{"filename": name} for name in indexed])
+	monkeypatch.setattr(
+		routes,
+		"delete_documents_by_filename",
+		lambda filename: indexed.remove(filename) if filename in indexed else 0,
+	)
+	def ingest(path, **kwargs):
+		ingested.append((path, kwargs))
+		indexed.append(path.rsplit("\\", 1)[-1])
+		return {"success": True, "chunks_added": 1}
+	monkeypatch.setattr(routes, "ingest_document", ingest)
 	calls = []
 
 	class Agent:
@@ -334,6 +474,15 @@ def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monk
 			assert calls[0]["user_message"] == "Explain this page"
 			assert calls[0]["source_filename"].startswith("attachment_")
 			assert calls[0]["conversation_messages"][-1]["content"] == "Explain this page"
+			listed = client.get("/api/documents").json()
+			attachments = [
+				item for item in listed
+				if item.get("storage_type") == "attachment" and item["conversation_id"] == conversation_id
+			]
+			assert len(attachments) == 1
+			assert attachments[0]["filename"] == "os notes.txt"
+			assert attachments[0]["status"] == "ready"
+			assert attachments[0]["source"] == calls[0]["source_filename"]
 
 			conversation = client.get(f"/api/conversations/{conversation_id}").json()
 			assert "os notes.txt" in conversation["messages"][0]["content"]
@@ -343,6 +492,61 @@ def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monk
 			})
 			assert follow_up.status_code == 200
 			assert calls[1]["source_filename"] == calls[0]["source_filename"]
+
+			duplicate = client.post(
+				"/api/chat/attachments",
+				data={"message": "Explain this other copy", "conversation_id": conversation_id},
+				files={"file": ("os notes.txt", b"Different attachment content")},
+			)
+			assert duplicate.status_code == 200
+			listed = client.get("/api/documents").json()
+			attachments = [
+				item for item in listed
+				if item.get("storage_type") == "attachment" and item["conversation_id"] == conversation_id
+			]
+			assert len(attachments) == 2
+			assert len({item["source"] for item in attachments}) == 2
+
+			first, second = attachments
+			first_path = tmp_path / "chat-attachments" / str(conversation_id) / first["source"]
+			ambiguous_legacy_delete = client.delete("/api/documents/os%20notes.txt")
+			assert ambiguous_legacy_delete.status_code == 409
+			assert first_path.is_file()
+			unauthorized = client.delete(
+				f"/api/documents/attachments/{conversation_id + 100000}/{first['source']}"
+			)
+			assert unauthorized.status_code == 404
+			assert first_path.is_file()
+			removed = client.delete(first["delete_url"])
+			assert removed.status_code == 200
+			assert not first_path.exists()
+			assert first["source"] not in indexed
+			assert [
+				item["source"] for item in client.get("/api/documents").json()
+				if item.get("storage_type") == "attachment" and item["conversation_id"] == conversation_id
+			] == [second["source"]]
+
+			second_path = tmp_path / "chat-attachments" / str(conversation_id) / second["source"]
+			second_path.unlink()
+			missing = next(item for item in client.get("/api/documents").json() if item.get("source") == second["source"])
+			assert missing["status"] == "missing"
+			removed_missing = client.delete(missing["delete_url"])
+			assert removed_missing.status_code == 200
+			assert second["source"] not in indexed
+			assert all(item.get("source") != second["source"] for item in client.get("/api/documents").json())
+
+			unique = client.post(
+				"/api/chat/attachments",
+				data={"message": "Explain the unique copy", "conversation_id": conversation_id},
+				files={"file": ("single note.txt", b"Unique attachment content")},
+			)
+			assert unique.status_code == 200
+			unique_source = calls[-1]["source_filename"]
+			unique_path = tmp_path / "chat-attachments" / str(conversation_id) / unique_source
+			legacy_delete = client.delete("/api/documents/single%20note.txt")
+			assert legacy_delete.status_code == 200
+			assert not unique_path.exists()
+			assert unique_source not in indexed
 	finally:
 		app.dependency_overrides.pop(get_agent, None)
 		db = SessionLocal()

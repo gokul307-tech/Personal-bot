@@ -225,7 +225,7 @@ $('composer').onsubmit=event=>{event.preventDefault();sendMessage(input.value);}
 
 renderDocumentList=async function(query){
   await baseRenderDocumentList(query);
-  document.querySelectorAll('[data-document-delete]').forEach(remove=>{const actions=remove.parentElement;if(!actions||actions.querySelector('[data-document-open]'))return;const ask=actions.querySelector('[data-ask-document]');const filename=ask?.dataset.askDocument;if(!filename)return;const open=document.createElement('button');open.type='button';open.dataset.documentOpen='true';open.textContent='View';open.title='Open this study material';open.onclick=()=>window.open(`/api/documents/${encodeURIComponent(filename)}/open`,'_blank','noopener');actions.prepend(open);});
+  document.querySelectorAll('[data-document-delete]').forEach(remove=>{const actions=remove.parentElement;if(!actions||actions.querySelector('[data-document-open]'))return;const ask=actions.querySelector('[data-ask-document]');const filename=ask?.dataset.askDocument;if(!filename||ask.dataset.storageType==='attachment')return;const open=document.createElement('button');open.type='button';open.dataset.documentOpen='true';open.textContent='View';open.title='Open this study material';open.onclick=()=>window.open(`/api/documents/${encodeURIComponent(filename)}/open`,'_blank','noopener');actions.prepend(open);});
 };
 
 renderSettingsPreferences=function(){};
