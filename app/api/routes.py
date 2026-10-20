@@ -182,7 +182,10 @@ async def chat_with_attachment(
         if not ingestion.get("success"):
             delete_documents_by_filename(source_filename)
             stored_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=422, detail="Could not process this attachment")
+            detail = ingestion.get("error")
+            if not isinstance(detail, str) or not detail.strip():
+                detail = "Could not process this attachment"
+            raise HTTPException(status_code=422, detail=detail)
 
         attachment = {
             "filename": display_name,
@@ -512,17 +515,48 @@ def remove_memory(memory_id: int):
 def list_documents(q: str | None = None):
     indexed = {item.get("filename") for item in get_all_documents()}
     documents = []
-    for path in DOCUMENTS_DIR.iterdir():
-        if not path.is_file() or (q and q.casefold() not in path.name.casefold()):
-            continue
-        documents.append({
-            "filename": path.name,
-            "size": path.stat().st_size,
-            "file_type": path.suffix.lower().lstrip("."),
-            "uploaded_at": datetime.fromtimestamp(path.stat().st_mtime),
-            "status": "ready" if path.name in indexed else "failed",
-        })
-    return documents
+    if DOCUMENTS_DIR.exists():
+        for path in DOCUMENTS_DIR.iterdir():
+            if not path.is_file() or path.name.startswith(".") or (q and q.casefold() not in path.name.casefold()):
+                continue
+            documents.append({
+                "filename": path.name,
+                "size": path.stat().st_size,
+                "file_type": path.suffix.lower().lstrip("."),
+                "uploaded_at": datetime.fromtimestamp(path.stat().st_mtime),
+                "status": "ready" if path.name in indexed else "failed",
+                "storage_type": "library",
+            })
+
+    db = next(get_db())
+    try:
+        seen = set()
+        for conversation in crud.get_conversations(db, USER_ID):
+            folder = CHAT_ATTACHMENTS_DIR / str(conversation.id)
+            for message in crud.get_messages(db, conversation.id):
+                for attachment in _message_attachments(message.content):
+                    source = str(attachment.get("source", ""))
+                    if not source or Path(source).name != source or (conversation.id, source) in seen:
+                        continue
+                    seen.add((conversation.id, source))
+                    if q and q.casefold() not in str(attachment.get("filename", source)).casefold():
+                        continue
+                    path = folder / source
+                    exists = path.is_file()
+                    documents.append({
+                        "filename": str(attachment.get("filename") or source),
+                        "size": path.stat().st_size if exists else max(0, int(attachment.get("size", 0) or 0)),
+                        "file_type": str(attachment.get("file_type") or Path(source).suffix.lstrip(".")).lower(),
+                        "uploaded_at": message.created_at,
+                        "status": "missing" if not exists else "ready" if source in indexed else "failed",
+                        "storage_type": "attachment",
+                        "source": source,
+                        "conversation_id": conversation.id,
+                        "delete_url": f"/api/documents/attachments/{conversation.id}/{source}",
+                    })
+        return sorted(documents, key=lambda item: item["uploaded_at"], reverse=True)
+    finally:
+        db.close()
 
 
 @router.get("/documents/{filename}/open")
@@ -557,7 +591,10 @@ def upload_document(file: UploadFile = File(...)):
         delete_documents_by_filename(safe_name)
         ingestion = ingest_document(str(target))
         if not ingestion.get("success"):
-            raise HTTPException(status_code=422, detail="Could not process this document")
+            detail = ingestion.get("error")
+            if not isinstance(detail, str) or not detail.strip():
+                detail = "Could not process this document"
+            raise HTTPException(status_code=422, detail=detail)
     except Exception:
         if previous_content is None:
             target.unlink(missing_ok=True)
@@ -580,8 +617,84 @@ def remove_document(filename: str):
     if safe_name != filename:
         raise HTTPException(status_code=400, detail="Invalid document name")
     target = DOCUMENTS_DIR / safe_name
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="Document not found")
-    target.unlink()
-    delete_documents_by_filename(safe_name)
-    return {"deleted": True, "filename": safe_name}
+    if target.is_file():
+        target.unlink()
+        delete_documents_by_filename(safe_name)
+        return {"deleted": True, "filename": safe_name}
+
+    db = next(get_db())
+    try:
+        matches = {}
+        for conversation in crud.get_conversations(db, USER_ID):
+            for message in crud.get_messages(db, conversation.id):
+                for attachment in _message_attachments(message.content):
+                    if attachment.get("filename") == safe_name:
+                        source = str(attachment.get("source", ""))
+                        if source and Path(source).name == source:
+                            matches[(conversation.id, source)] = source
+        if len(matches) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail="Multiple chat attachments have this name. Refresh Uploads and delete the specific entry.",
+            )
+        if matches:
+            conversation_id, source = next(iter(matches))
+            _delete_chat_attachment(conversation_id, source, db)
+        else:
+            delete_documents_by_filename(safe_name)
+        return {"deleted": True, "filename": safe_name}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _delete_chat_attachment(conversation_id: int, source: str, db) -> None:
+    safe_source = Path(source).name
+    if not safe_source or safe_source != source:
+        raise HTTPException(status_code=400, detail="Invalid attachment name")
+
+    conversation = crud.get_conversation(db, conversation_id, USER_ID)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    matching_messages = []
+    for message in crud.get_messages(db, conversation_id):
+        attachments = _message_attachments(message.content)
+        if any(item.get("source") == safe_source for item in attachments):
+            matching_messages.append((message, attachments))
+    if not matching_messages:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    folder = (CHAT_ATTACHMENTS_DIR / str(conversation_id)).resolve()
+    target = (folder / safe_source).resolve()
+    try:
+        target.relative_to(folder)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid attachment path") from exc
+
+    target.unlink(missing_ok=True)
+    delete_documents_by_filename(safe_source)
+    for message, attachments in matching_messages:
+        remaining = [item for item in attachments if item.get("source") != safe_source]
+        text = _message_text(message.content)
+        message.content = (
+            text + ATTACHMENT_MARKER + json.dumps(remaining, ensure_ascii=True) + "-->"
+            if remaining
+            else text
+        )
+    db.commit()
+
+
+@router.delete("/documents/attachments/{conversation_id}/{source}")
+def remove_chat_attachment(conversation_id: int, source: str):
+    db = next(get_db())
+    try:
+        _delete_chat_attachment(conversation_id, source, db)
+        return {"deleted": True, "source": Path(source).name}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
