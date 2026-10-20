@@ -94,10 +94,10 @@ def ingest_document(
 
     except Exception as exc:
         logger.exception("Document ingestion failed for %s", path.name)
-
+        error = str(exc) if isinstance(exc, (ValueError, PermissionError, FileNotFoundError)) else "Document indexing failed. Please try again."
         return {
             "success": False,
-            "error": f"Document ingestion failed: {exc}",
+            "error": error,
         }
 
 
