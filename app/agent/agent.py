@@ -107,12 +107,18 @@ class VDSSAgent:
                     f"Retrieved excerpts:\n{evidence or '[No relevant excerpts found.]'}"
                 ),
             })
-        messages.extend(conversation_messages or self.memory.get_conversation())
+        recent_context = (conversation_messages or self.memory.get_conversation())[-8:]
+        messages.extend(recent_context)
 
         for _ in range(self.max_tool_iterations):
             try:
                 tools = self.registry.openai_tools() if plan.get("requires_tools") and not source_filename else None
                 response = ask_llm(messages=messages, tools=tools)
+            except TimeoutError:
+                logger.warning("OpenRouter timed out while handling %s", user_message[:120])
+                if source_filename:
+                    return self._format_document_excerpts(source_filename, chunks)
+                return self._run_without_llm(user_message, db)
             except Exception:
                 logger.exception("Language-model request failed")
                 if source_filename:

@@ -204,6 +204,7 @@ def create_study_plan(
     scheduled_at: datetime | None = None,
     user_id: int | None = None,
     priority: str = "medium",
+    estimated_minutes: int = 60,
 ):
 
     plan = StudyPlan(
@@ -213,6 +214,7 @@ def create_study_plan(
         scheduled_at=scheduled_at,
         user_id=user_id,
         priority=priority,
+        estimated_minutes=estimated_minutes,
     )
 
     db.add(plan)

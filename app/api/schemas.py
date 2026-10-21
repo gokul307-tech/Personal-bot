@@ -105,6 +105,7 @@ class StudyPlanCreate(BaseModel):
     description: str | None = Field(default=None, max_length=50_000)
     scheduled_at: str | None = None
     priority: Literal["low", "medium", "high"] = "medium"
+    estimated_minutes: int = Field(default=60, ge=5, le=1440)
 
     @field_validator("title")
     @classmethod
@@ -122,6 +123,7 @@ class StudyPlanUpdate(BaseModel):
     scheduled_at: str | None = None
     completed: bool | None = None
     priority: Literal["low", "medium", "high"] | None = None
+    estimated_minutes: int | None = Field(default=None, ge=5, le=1440)
 
     @field_validator("title")
     @classmethod
@@ -137,6 +139,8 @@ class StudyPlanUpdate(BaseModel):
     def reject_null_title_update(self):
         if "title" in self.model_fields_set and self.title is None:
             raise ValueError("Title cannot be null.")
+        if "estimated_minutes" in self.model_fields_set and self.estimated_minutes is None:
+            raise ValueError("estimated_minutes cannot be null.")
         return self
 
 
@@ -151,6 +155,27 @@ class StudyPlanRequest(BaseModel):
         if not value:
             raise ValueError("Study request cannot be blank.")
         return value
+
+
+class StudyPlanTaskInput(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    subject: str | None = Field(default=None, max_length=100)
+    description: str | None = Field(default=None, max_length=50_000)
+    scheduled_at: str | None = None
+    priority: Literal["low", "medium", "high"] = "medium"
+    estimated_minutes: int = Field(default=60, ge=5, le=1440)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Title cannot be blank.")
+        return value
+
+
+class StudyPlanBulkCreate(BaseModel):
+    tasks: list[StudyPlanTaskInput] = Field(min_length=1, max_length=30)
 
 
 class MemoryCreate(BaseModel):

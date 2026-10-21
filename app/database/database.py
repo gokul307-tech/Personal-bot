@@ -66,3 +66,8 @@ def create_tables():
                 connection.execute(text(
                     "ALTER TABLE study_plans ADD COLUMN priority VARCHAR(20) NOT NULL DEFAULT 'medium'"
                 ))
+        if "estimated_minutes" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE study_plans ADD COLUMN estimated_minutes INTEGER NOT NULL DEFAULT 60"
+                ))

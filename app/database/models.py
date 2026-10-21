@@ -165,6 +165,13 @@ class StudyPlan(Base):
         server_default="medium",
     )
 
+    estimated_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=60,
+        server_default="60",
+    )
+
 
 class Memory(Base):
 

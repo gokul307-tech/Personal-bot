@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agent.agent import VDSSAgent
 from app.agent.executor import ToolExecutor
 from app.agent.registry import create_default_registry
 import app.database.database as database
@@ -104,3 +105,14 @@ def test_chat_agent_failure_returns_friendly_error_without_exception_details():
         finally:
             app.dependency_overrides.pop(get_agent, None)
             client.delete(f"/api/conversations/{conversation_id}")
+
+
+def test_agent_handles_llm_timeout_gracefully(monkeypatch):
+    agent = VDSSAgent(create_default_registry())
+    monkeypatch.setattr(VDSSAgent, "_llm_available", lambda _self: True)
+    monkeypatch.setattr("app.agent.agent.ask_llm", lambda **_: (_ for _ in ()).throw(TimeoutError("timed out")))
+
+    result = agent.run("Explain a beginner-friendly Python for loop.")
+
+    assert isinstance(result, str)
+    assert "loop" in result.lower() or "I could not complete" in result

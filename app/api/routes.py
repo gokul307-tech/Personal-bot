@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime
 import json
 import logging
 import mimetypes
 from pathlib import Path
-import re
 from uuid import uuid4
 import shutil
 
@@ -12,7 +11,6 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from app.agent.agent import VDSSAgent
-from app.agent.planner import AgentPlanner
 from app.api.dependencies import get_agent
 from app.api.schemas import (
     ChatRequest,
@@ -25,6 +23,7 @@ from app.api.schemas import (
     NoteCreate,
     NoteUpdate,
     StudyPlanCreate,
+    StudyPlanBulkCreate,
     StudyPlanRequest,
     StudyPlanUpdate,
 )
@@ -34,6 +33,7 @@ from app.database.database import get_db
 from app.database.models import StudyPlan
 from app.tools.rag import ingest_document
 from app.rag.vector_store import add_documents, delete_documents_by_filename, get_all_documents
+from app.services.study_plan_service import categorize_study_plans, generate_study_schedule
 
 
 router = APIRouter()
@@ -375,7 +375,74 @@ def remove_note(note_id: int):
 def list_study_plans():
     db = next(get_db())
     try:
-        return [{"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority} for plan in crud.get_study_plans(db, USER_ID)]
+        return [_serialize_study_plan(plan) for plan in crud.get_study_plans(db, USER_ID)]
+    finally:
+        db.close()
+
+
+def _serialize_study_plan(plan: StudyPlan) -> dict:
+    return {
+        "id": plan.id,
+        "title": plan.title,
+        "subject": plan.subject,
+        "description": plan.description,
+        "scheduled_at": plan.scheduled_at,
+        "completed": plan.completed,
+        "priority": plan.priority,
+        "estimated_minutes": plan.estimated_minutes,
+    }
+
+
+def _save_study_plan_tasks(db, tasks: list[dict]) -> tuple[list[StudyPlan], int]:
+    existing = crud.get_study_plans(db, USER_ID)
+
+    def signature(title: str, subject: str | None, scheduled_at: datetime | None) -> tuple[str, str, str | None]:
+        return (
+            title.strip().casefold(),
+            (subject or "").strip().casefold(),
+            scheduled_at.isoformat() if scheduled_at else None,
+        )
+
+    known = {
+        signature(plan.title, plan.subject, plan.scheduled_at)
+        for plan in existing
+    }
+    prepared = []
+    duplicates = 0
+    for task in tasks:
+        scheduled_at = datetime.fromisoformat(task["scheduled_at"]) if task.get("scheduled_at") else None
+        task_signature = signature(task["title"], task.get("subject"), scheduled_at)
+        if task_signature in known:
+            duplicates += 1
+            continue
+        known.add(task_signature)
+        prepared.append(StudyPlan(
+            title=task["title"],
+            subject=task.get("subject"),
+            description=task.get("description"),
+            scheduled_at=scheduled_at,
+            user_id=USER_ID,
+            priority=task.get("priority", "medium"),
+            estimated_minutes=task.get("estimated_minutes", 60),
+        ))
+    try:
+        db.add_all(prepared)
+        db.flush()
+        db.commit()
+        for plan in prepared:
+            db.refresh(plan)
+    except Exception:
+        db.rollback()
+        raise
+    return prepared, duplicates
+
+
+@router.get("/study-plans/statistics")
+def study_plan_statistics(today: date | None = None):
+    db = next(get_db())
+    try:
+        plans = [_serialize_study_plan(plan) for plan in crud.get_study_plans(db, USER_ID)]
+        return categorize_study_plans(plans, today or date.today())
     finally:
         db.close()
 
@@ -385,8 +452,17 @@ def create_study_plan(request: StudyPlanCreate):
     db = next(get_db())
     try:
         scheduled_at = datetime.fromisoformat(request.scheduled_at) if request.scheduled_at else None
-        plan = crud.create_study_plan(db, request.title, request.subject, request.description, scheduled_at, USER_ID, request.priority)
-        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority}
+        plan = crud.create_study_plan(
+            db,
+            request.title,
+            request.subject,
+            request.description,
+            scheduled_at,
+            USER_ID,
+            request.priority,
+            request.estimated_minutes,
+        )
+        return _serialize_study_plan(plan)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="scheduled_at must be an ISO datetime") from exc
     finally:
@@ -397,41 +473,35 @@ def create_study_plan(request: StudyPlanCreate):
 def create_study_plan_from_request(request: StudyPlanRequest):
     db = next(get_db())
     try:
-        arguments = AgentPlanner().build_tool_arguments(
-            f"Create a study plan for {request.request}",
-            "create_plan",
+        generated = generate_study_schedule(request.request, request.priority)
+        plans, duplicates = _save_study_plan_tasks(db, generated)
+        return {
+            "tasks": [_serialize_study_plan(plan) for plan in plans],
+            "created": len(plans),
+            "duplicates": duplicates,
+        }
+    finally:
+        db.close()
+
+
+@router.post("/study-plans/preview")
+def preview_study_plan(request: StudyPlanRequest):
+    return {"tasks": generate_study_schedule(request.request, request.priority)}
+
+
+@router.post("/study-plans/bulk")
+def create_study_plan_tasks(request: StudyPlanBulkCreate):
+    db = next(get_db())
+    try:
+        plans, duplicates = _save_study_plan_tasks(
+            db,
+            [task.model_dump() for task in request.tasks],
         )
-        subject = arguments.get("subject") or "General"
-        duration = re.search(r"\b(\d{1,2})\s+days?\b", request.request, re.IGNORECASE)
-        days = min(int(duration.group(1)), 30) if duration else 1
-        today = datetime.now().replace(hour=18, minute=0, second=0, microsecond=0)
-        activities = [
-            "Review the core concepts and identify topics to revisit.",
-            "Practice representative questions and review mistakes.",
-            "Revisit weak areas and complete a timed self-test.",
-        ]
-        tasks = []
-        for index in range(days):
-            activity = activities[index] if days == 3 else f"Study {subject} concepts and complete focused practice for day {index + 1}."
-            plan = crud.create_study_plan(
-                db=db,
-                title=f"{subject} - Day {index + 1}/{days}" if days > 1 else f"Study {subject}",
-                subject=subject,
-                description=activity if days > 1 else request.request,
-                scheduled_at=today + timedelta(days=index),
-                user_id=USER_ID,
-                priority=request.priority,
-            )
-            tasks.append({
-                "id": plan.id,
-                "title": plan.title,
-                "subject": plan.subject,
-                "description": plan.description,
-                "scheduled_at": plan.scheduled_at,
-                "completed": plan.completed,
-                "priority": plan.priority,
-            })
-        return {"tasks": tasks}
+        return {
+            "tasks": [_serialize_study_plan(plan) for plan in plans],
+            "created": len(plans),
+            "duplicates": duplicates,
+        }
     finally:
         db.close()
 
@@ -458,7 +528,8 @@ def update_study_plan(
         for field, value in updates.items():
             setattr(plan, field, value)
         db.commit()
-        return {"id": plan.id, "title": plan.title, "subject": plan.subject, "description": plan.description, "scheduled_at": plan.scheduled_at, "completed": plan.completed, "priority": plan.priority}
+        db.refresh(plan)
+        return _serialize_study_plan(plan)
     finally:
         db.close()
 
