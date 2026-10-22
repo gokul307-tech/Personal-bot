@@ -30,7 +30,8 @@ from app.api.schemas import (
 from app.config.settings import APP_NAME, DOCUMENTS_DIR, UPLOADS_DIR
 from app.database import crud
 from app.database.database import get_db
-from app.database.models import StudyPlan
+from app.database.models import Note, StudyPlan
+from app.tools.pdf_reader import read_pdf_pages
 from app.tools.rag import ingest_document
 from app.rag.vector_store import add_documents, delete_documents_by_filename, get_all_documents
 from app.services.study_plan_service import categorize_study_plans, generate_study_schedule
@@ -40,6 +41,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 USER_ID = 1
 CHAT_ATTACHMENTS_DIR = UPLOADS_DIR / "chat-attachments"
+NOTE_ATTACHMENTS_DIR = UPLOADS_DIR / "note-attachments"
 ATTACHMENT_MARKER = "\n\n<!--sage-attachments:"
 
 
@@ -57,6 +59,47 @@ def _message_attachments(content: str) -> list[dict]:
 def _message_text(content: str) -> str:
     marker_index = content.rfind(ATTACHMENT_MARKER)
     return content[:marker_index] if marker_index >= 0 else content
+
+
+def _note_pdf_path(note: Note) -> Path | None:
+    if not note.pdf_storage_name:
+        return None
+    storage_name = note.pdf_storage_name
+    if Path(storage_name).name != storage_name or not storage_name.endswith(".pdf"):
+        raise HTTPException(status_code=500, detail="Stored note PDF reference is invalid")
+    root = NOTE_ATTACHMENTS_DIR.resolve()
+    path = (root / storage_name).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="Stored note PDF reference is invalid") from exc
+    return path
+
+
+def _stage_note_pdf(note: Note) -> tuple[Path | None, Path | None]:
+    path = _note_pdf_path(note)
+    if path is None or not path.exists():
+        return path, None
+    staged = path.with_name(f".{path.name}.{uuid4().hex}.deleting")
+    path.replace(staged)
+    return path, staged
+
+
+def _restore_staged_note_pdf(original: Path | None, staged: Path | None) -> None:
+    if original is not None and staged is not None and staged.exists():
+        staged.replace(original)
+
+
+def _serialize_note(note: Note) -> dict:
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "subject": note.subject,
+        "created_at": note.created_at,
+        "pdf_filename": note.pdf_filename,
+        "has_pdf": bool(note.pdf_storage_name),
+    }
 
 
 def _delete_conversation_attachments(conversation_id: int, db) -> None:

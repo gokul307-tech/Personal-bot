@@ -71,3 +71,11 @@ def create_tables():
                 connection.execute(text(
                     "ALTER TABLE study_plans ADD COLUMN estimated_minutes INTEGER NOT NULL DEFAULT 60"
                 ))
+    if "notes" in inspect(engine).get_table_names():
+        columns = {column["name"] for column in inspect(engine).get_columns("notes")}
+        if "pdf_filename" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE notes ADD COLUMN pdf_filename VARCHAR(255)"))
+        if "pdf_storage_name" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE notes ADD COLUMN pdf_storage_name VARCHAR(100)"))

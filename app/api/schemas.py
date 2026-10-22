@@ -1,5 +1,15 @@
+from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
+
+
+def _validate_iso_datetime(value: str | None) -> str | None:
+    if value is not None:
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("scheduled_at must be an ISO datetime") from exc
+    return value
 
 
 class ChatRequest(BaseModel):
@@ -115,6 +125,11 @@ class StudyPlanCreate(BaseModel):
             raise ValueError("Title cannot be blank.")
         return value
 
+    @field_validator("scheduled_at")
+    @classmethod
+    def validate_scheduled_at(cls, value: str | None) -> str | None:
+        return _validate_iso_datetime(value)
+
 
 class StudyPlanUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
@@ -134,6 +149,11 @@ class StudyPlanUpdate(BaseModel):
         if not value:
             raise ValueError("Title cannot be blank.")
         return value
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def validate_scheduled_at(cls, value: str | None) -> str | None:
+        return _validate_iso_datetime(value)
 
     @model_validator(mode="after")
     def reject_null_title_update(self):
@@ -172,6 +192,11 @@ class StudyPlanTaskInput(BaseModel):
         if not value:
             raise ValueError("Title cannot be blank.")
         return value
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def validate_scheduled_at(cls, value: str | None) -> str | None:
+        return _validate_iso_datetime(value)
 
 
 class StudyPlanBulkCreate(BaseModel):

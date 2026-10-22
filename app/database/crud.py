@@ -110,6 +110,8 @@ def create_note(
     content: str,
     subject: str | None = None,
     user_id: int | None = None,
+    pdf_filename: str | None = None,
+    pdf_storage_name: str | None = None,
 ):
 
     note = Note(
@@ -117,6 +119,8 @@ def create_note(
         content=content,
         subject=subject,
         user_id=user_id,
+        pdf_filename=pdf_filename,
+        pdf_storage_name=pdf_storage_name,
     )
 
     db.add(note)

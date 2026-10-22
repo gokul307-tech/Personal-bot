@@ -62,6 +62,18 @@ def generate_study_schedule(
     start_date: date | None = None,
 ) -> list[dict[str, Any]]:
     duration_match = re.search(r"\b(\d{1,2})\s*(days?|weeks?)\b", request, re.IGNORECASE)
+    daily_duration_match = re.search(
+        r"\b(\d+(?:\.\d+)?)\s*(hours?|hrs?|minutes?|mins?)\s*(?:(?:each|per)\s+day|daily|a\s+day|/day)\b",
+        request,
+        re.IGNORECASE,
+    )
+    estimated_minutes = 60
+    if daily_duration_match:
+        amount = float(daily_duration_match.group(1))
+        unit = daily_duration_match.group(2).casefold()
+        estimated_minutes = round(amount * 60) if unit.startswith(("hour", "hr")) else round(amount)
+        estimated_minutes = min(max(estimated_minutes, 5), 1440)
+
     days = 1
     if duration_match:
         days = int(duration_match.group(1))
@@ -74,9 +86,15 @@ def generate_study_schedule(
         r"\bstudy\s+(?:for\s+)?(.+?)(?=[.!?,;:]|$)",
         r"\brevise\s+(.+?)(?=[.!?,;:]|$)",
     )
+    subject_request = re.sub(
+        r"\s+(?:for\s+)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|minutes?|mins?)\s*(?:(?:each|per)\s+day|daily|a\s+day|/day)\b",
+        "",
+        request,
+        flags=re.IGNORECASE,
+    )
     subject = None
     for pattern in topic_patterns:
-        match = re.search(pattern, request, re.IGNORECASE)
+        match = re.search(pattern, subject_request, re.IGNORECASE)
         if match:
             subject = match.group(1).strip()
             subject = re.sub(r"^(?:in|over|within)\s+\d+\s+\w+\s+(?:to\s+)?", "", subject, flags=re.IGNORECASE)
@@ -84,8 +102,12 @@ def generate_study_schedule(
             if subject:
                 break
     subject = subject or "General"
-    subject = re.sub(r"\s+(?:in|over|within)\s+\d+\s+(?:days?|weeks?).*$", "", subject, flags=re.IGNORECASE).strip()
-    start = start_date or date.today()
+    subject = re.sub(r"\s+(?:in|over|within|for)\s+\d+\s+(?:days?|weeks?).*$", "", subject, flags=re.IGNORECASE).strip()
+    if start_date is None:
+        now = datetime.now()
+        start = now.date() + timedelta(days=1 if now.hour >= 18 else 0)
+    else:
+        start = start_date
     activities = (
         ("Review core concepts", "Review the core concepts and identify topics to revisit."),
         ("Practice key questions", "Practice representative questions and review mistakes."),
@@ -102,6 +124,6 @@ def generate_study_schedule(
             "description": description,
             "scheduled_at": due.isoformat(),
             "priority": priority,
-            "estimated_minutes": 60,
+            "estimated_minutes": estimated_minutes,
         })
     return tasks
