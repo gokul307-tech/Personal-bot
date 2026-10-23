@@ -298,6 +298,7 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Chat")
+    template: Mapped[str] = mapped_column(String(20), nullable=False, default="general", server_default="general")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -15,8 +15,8 @@ from app.database.models import (
 )
 
 
-def create_conversation(db: Session, user_id: int = 1, title: str = "New Chat"):
-    conversation = Conversation(user_id=user_id, title=title)
+def create_conversation(db: Session, user_id: int = 1, title: str = "New Chat", template: str = "general"):
+    conversation = Conversation(user_id=user_id, title=title, template=template)
     db.add(conversation)
     db.commit()
     db.refresh(conversation)

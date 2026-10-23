@@ -57,7 +57,7 @@ def _upload_note(client, filename="lecture.pdf", content=b"placeholder"):
     )
 
 
-def test_note_pdf_upload_list_and_view_survive_database_reload(tmp_path, monkeypatch):
+def test_note_pdf_upload_list_and_view_on_followup_request(tmp_path, monkeypatch):
     _database(monkeypatch)
     monkeypatch.setattr(routes, "NOTE_ATTACHMENTS_DIR", tmp_path / "uploads" / "note-attachments")
     monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
@@ -79,16 +79,52 @@ def test_note_pdf_upload_list_and_view_survive_database_reload(tmp_path, monkeyp
 
         viewed = client.get(f"/api/notes/{note['id']}/pdf")
         assert viewed.status_code == 200
+        assert "inline" in viewed.headers["content-disposition"]
         assert viewed.content == pdf_path.read_bytes()
 
-        db = next(routes.get_db())
-        db.close()
         refreshed = client.get("/api/notes").json()
         assert refreshed[0]["pdf_filename"] == "lecture.pdf"
 
 
-@pytest.mark.parametrize("pdf_bytes", [b"not a PDF", b""])
-def test_note_pdf_rejects_invalid_or_empty_files_without_orphans(tmp_path, monkeypatch, pdf_bytes):
+def test_note_pdfs_have_a_separate_uploads_list(tmp_path, monkeypatch):
+    _database(monkeypatch)
+    monkeypatch.setattr(routes, "NOTE_ATTACHMENTS_DIR", tmp_path / "uploads" / "note-attachments")
+    monkeypatch.setattr(routes, "DOCUMENTS_DIR", tmp_path / "documents")
+    monkeypatch.setattr(routes, "get_all_documents", lambda: [])
+    monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
+    pdf_path = tmp_path / "handout.pdf"
+    _write_text_pdf(pdf_path)
+
+    with TestClient(app) as client:
+        uploaded = _upload_note(client, filename="handout.pdf", content=pdf_path.read_bytes())
+        note = uploaded.json()
+
+        listed = client.get("/api/notes/pdfs")
+        assert listed.status_code == 200
+        assert listed.json() == [{
+            "note_id": note["id"],
+            "note_title": "Lecture note",
+            "filename": "handout.pdf",
+            "status": "ready",
+            "size": len(pdf_path.read_bytes()),
+            "uploaded_at": note["created_at"],
+            "view_url": f"/api/notes/{note['id']}/pdf",
+            "delete_url": f"/api/notes/{note['id']}/pdf",
+        }]
+
+        documents = client.get("/api/documents").json()
+        assert all(item.get("filename") != "handout.pdf" for item in documents)
+
+        deleted = client.delete(listed.json()[0]["delete_url"])
+        assert deleted.status_code == 200
+        assert client.get("/api/notes/pdfs").json() == []
+
+
+@pytest.mark.parametrize(("pdf_bytes", "expected_detail"), [
+    (b"not a PDF", "This PDF is malformed or unreadable."),
+    (b"", "The PDF file is empty."),
+])
+def test_note_pdf_rejects_invalid_or_empty_files_without_orphans(tmp_path, monkeypatch, pdf_bytes, expected_detail):
     _database(monkeypatch)
     monkeypatch.setattr(routes, "NOTE_ATTACHMENTS_DIR", tmp_path / "uploads" / "note-attachments")
     monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
@@ -97,14 +133,32 @@ def test_note_pdf_rejects_invalid_or_empty_files_without_orphans(tmp_path, monke
         response = _upload_note(client, content=pdf_bytes)
 
     assert response.status_code == 422
-    assert response.json()["detail"]
-    assert routes.NOTE_ATTACHMENTS_DIR.exists()
-    assert list(routes.NOTE_ATTACHMENTS_DIR.iterdir()) == []
+    assert response.json()["detail"] == expected_detail
+    assert not routes.NOTE_ATTACHMENTS_DIR.exists() or list(routes.NOTE_ATTACHMENTS_DIR.iterdir()) == []
     db = next(routes.get_db())
     try:
         assert db.query(routes.Note).count() == 0
     finally:
         db.close()
+
+
+def test_note_pdf_rejects_password_protected_file(tmp_path, monkeypatch):
+    _database(monkeypatch)
+    monkeypatch.setattr(routes, "NOTE_ATTACHMENTS_DIR", tmp_path / "uploads" / "note-attachments")
+    monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
+    encrypted_path = tmp_path / "encrypted.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.encrypt("secret")
+    with encrypted_path.open("wb") as output:
+        writer.write(output)
+
+    with TestClient(app) as client:
+        response = _upload_note(client, content=encrypted_path.read_bytes())
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "This PDF is password-protected. Remove the password and upload it again."
+    assert not routes.NOTE_ATTACHMENTS_DIR.exists() or list(routes.NOTE_ATTACHMENTS_DIR.iterdir()) == []
 
 
 def test_note_pdf_and_note_deletion_clean_only_their_attachment(tmp_path, monkeypatch):

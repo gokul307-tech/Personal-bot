@@ -37,11 +37,15 @@ class VDSSAgent:
         conversation_messages: list[dict[str, Any]] | None = None,
         source_filename: str | None = None,
         preferences: dict[str, Any] | None = None,
+        conversation_template: str = "general",
     ) -> str:
 
         plan = None if source_filename else self.planner.fast_path(user_message)
         plan = plan or self.planner.plan(user_message)
         self.memory.add_message(role="user", content=user_message)
+
+        if conversation_template == "document" and not source_filename:
+            return "Attach or select a document in this conversation so I can answer from its contents."
 
         if not self._llm_available():
             if source_filename:
@@ -49,6 +53,13 @@ class VDSSAgent:
             return self._run_without_llm(user_message, db)
 
         system_content = SYSTEM_PROMPT
+        template_instructions = {
+            "study": "Conversation template: Study Tutor. Teach for a beginner with clear step-by-step explanations and helpful examples.",
+            "coding": "Conversation template: Coding Assistant. Focus on programming explanations, debugging, and practical code help. Explain assumptions and do not claim code was executed unless a tool did so.",
+            "document": "Conversation template: Document Assistant. Ground answers in documents attached to or selected in this conversation. If there is no document evidence, ask the user to attach or select a document instead of guessing.",
+        }
+        if conversation_template in template_instructions:
+            system_content += f"\n{template_instructions[conversation_template]}"
         if plan.get("exam_mode"):
             system_content += f"\nThe student requested a {plan['exam_mode']} answer. Match that length and structure."
         if preferences:

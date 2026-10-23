@@ -79,3 +79,10 @@ def create_tables():
         if "pdf_storage_name" not in columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE notes ADD COLUMN pdf_storage_name VARCHAR(100)"))
+    if "conversations" in inspect(engine).get_table_names():
+        columns = {column["name"] for column in inspect(engine).get_columns("conversations")}
+        if "template" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE conversations ADD COLUMN template VARCHAR(20) NOT NULL DEFAULT 'general'"
+                ))

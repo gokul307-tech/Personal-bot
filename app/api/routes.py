@@ -128,7 +128,7 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
         conversation = (
             crud.get_conversation(db, request.conversation_id, USER_ID)
             if request.conversation_id
-            else crud.create_conversation(db, USER_ID)
+            else crud.create_conversation(db, USER_ID, template=request.template)
         )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -158,6 +158,7 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
                 conversation_messages=context,
                 source_filename=request.source_filename,
                 preferences=request.preferences.model_dump(),
+                conversation_template=conversation.template,
             )
         except HTTPException:
             raise
@@ -185,6 +186,7 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
 async def chat_with_attachment(
     message: str = Form(..., min_length=1, max_length=20_000),
     conversation_id: int | None = Form(default=None),
+    template: str = Form(default="general"),
     file: UploadFile = File(...),
     preferences: str = Form(default="{}"),
     auto_title: bool = Form(default=True),
@@ -194,6 +196,8 @@ async def chat_with_attachment(
         chat_preferences = ChatPreferences.model_validate_json(preferences)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Invalid chat preferences") from exc
+    if template not in {"general", "study", "coding", "document"}:
+        raise HTTPException(status_code=422, detail="Invalid conversation template")
 
     db = next(get_db())
     stored_path: Path | None = None
@@ -203,7 +207,7 @@ async def chat_with_attachment(
         conversation = (
             crud.get_conversation(db, conversation_id, USER_ID)
             if conversation_id
-            else crud.create_conversation(db, USER_ID)
+            else crud.create_conversation(db, USER_ID, template=template)
         )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -250,6 +254,7 @@ async def chat_with_attachment(
                 conversation_messages=context,
                 source_filename=source_filename,
                 preferences=chat_preferences.model_dump(),
+                conversation_template=conversation.template,
             )
         except HTTPException:
             raise
@@ -289,6 +294,7 @@ def list_conversations():
             result.append({
                 "id": item.id,
                 "title": item.title,
+                "template": item.template,
                 "created_at": item.created_at,
                 "updated_at": item.updated_at,
                 "preview": _message_text(messages[-1].content)[:100] if messages else "Start a new study session",
@@ -302,8 +308,19 @@ def list_conversations():
 def create_conversation(request: ConversationCreate):
     db = next(get_db())
     try:
-        item = crud.create_conversation(db, USER_ID, request.title.strip() or "New Chat")
-        return {"id": item.id, "title": item.title, "created_at": item.created_at, "updated_at": item.updated_at}
+        item = crud.create_conversation(
+            db,
+            USER_ID,
+            request.title.strip() or "New Chat",
+            request.template,
+        )
+        return {
+            "id": item.id,
+            "title": item.title,
+            "template": item.template,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+        }
     finally:
         db.close()
 
@@ -318,6 +335,7 @@ def get_conversation(conversation_id: int):
         return {
             "id": item.id,
             "title": item.title,
+            "template": item.template,
             "messages": [
                 {"id": message.id, "role": message.role, "content": message.content, "created_at": message.created_at}
                 for message in crud.get_messages(db, conversation_id)
@@ -371,8 +389,41 @@ def list_notes(q: str | None = None):
         notes = crud.get_notes(db, user_id=USER_ID)
         if q:
             query = q.casefold()
-            notes = [note for note in notes if query in note.title.casefold() or query in note.content.casefold() or query in (note.subject or "").casefold()]
-        return [{"id": note.id, "title": note.title, "content": note.content, "subject": note.subject, "created_at": note.created_at} for note in notes]
+            notes = [
+                note for note in notes
+                if query in note.title.casefold()
+                or query in note.content.casefold()
+                or query in (note.subject or "").casefold()
+                or query in (note.pdf_filename or "").casefold()
+            ]
+        return [_serialize_note(note) for note in notes]
+    finally:
+        db.close()
+
+
+@router.get("/notes/pdfs")
+def list_note_pdfs(q: str | None = None):
+    db = next(get_db())
+    try:
+        results = []
+        for note in crud.get_notes(db, user_id=USER_ID):
+            if not note.pdf_storage_name:
+                continue
+            if q and q.casefold() not in (note.pdf_filename or "").casefold() and q.casefold() not in note.title.casefold():
+                continue
+            path = _note_pdf_path(note)
+            exists = path is not None and path.is_file()
+            results.append({
+                "note_id": note.id,
+                "note_title": note.title,
+                "filename": note.pdf_filename or "note.pdf",
+                "status": "ready" if exists else "missing",
+                "size": path.stat().st_size if exists else 0,
+                "uploaded_at": note.created_at,
+                "view_url": f"/api/notes/{note.id}/pdf",
+                "delete_url": f"/api/notes/{note.id}/pdf",
+            })
+        return results
     finally:
         db.close()
 
@@ -382,7 +433,101 @@ def create_note(request: NoteCreate):
     db = next(get_db())
     try:
         note = crud.create_note(db, request.title, request.content, request.subject, USER_ID)
-        return {"id": note.id, "title": note.title, "content": note.content, "subject": note.subject, "created_at": note.created_at}
+        return _serialize_note(note)
+    finally:
+        db.close()
+
+
+@router.post("/notes/with-pdf")
+async def create_note_with_pdf(
+    title: str = Form(..., min_length=1, max_length=255),
+    content: str = Form(default="", max_length=50_000),
+    subject: str | None = Form(default=None, max_length=100),
+    file: UploadFile = File(...),
+):
+    safe_filename = Path(file.filename or "").name
+    if not safe_filename or Path(safe_filename).suffix.lower() != ".pdf":
+        raise HTTPException(status_code=400, detail="Choose a PDF file.")
+    normalized_title = title.strip()
+    if not normalized_title:
+        raise HTTPException(status_code=422, detail="Note title cannot be blank.")
+    content_bytes = await file.read(10 * 1024 * 1024 + 1)
+    if len(content_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="PDF must be 10 MB or smaller.")
+    if not content_bytes:
+        raise HTTPException(status_code=422, detail="The PDF file is empty.")
+
+    NOTE_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    storage_name = f"note_{uuid4().hex}.pdf"
+    stored_path = NOTE_ATTACHMENTS_DIR / storage_name
+    temporary_path = NOTE_ATTACHMENTS_DIR / f".{uuid4().hex}.uploading.pdf"
+    db = next(get_db())
+    try:
+        temporary_path.write_bytes(content_bytes)
+        try:
+            read_pdf_pages(str(temporary_path))
+        except (ValueError, PermissionError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        temporary_path.replace(stored_path)
+        note = crud.create_note(
+            db,
+            normalized_title,
+            content.strip(),
+            subject.strip() if subject and subject.strip() else None,
+            USER_ID,
+            safe_filename,
+            storage_name,
+        )
+        return _serialize_note(note)
+    except Exception:
+        db.rollback()
+        stored_path.unlink(missing_ok=True)
+        raise
+    finally:
+        temporary_path.unlink(missing_ok=True)
+        db.close()
+
+
+@router.get("/notes/{note_id}/pdf")
+def open_note_pdf(note_id: int):
+    db = next(get_db())
+    try:
+        note = crud.get_note(db, note_id, USER_ID)
+        if note is None or not note.pdf_storage_name:
+            raise HTTPException(status_code=404, detail="Note PDF not found")
+        path = _note_pdf_path(note)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="Note PDF file is missing")
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=note.pdf_filename or "note.pdf",
+            content_disposition_type="inline",
+        )
+    finally:
+        db.close()
+
+
+@router.delete("/notes/{note_id}/pdf")
+def remove_note_pdf(note_id: int):
+    db = next(get_db())
+    original_path = None
+    staged_path = None
+    try:
+        note = crud.get_note(db, note_id, USER_ID)
+        if note is None or not note.pdf_storage_name:
+            raise HTTPException(status_code=404, detail="Note PDF not found")
+        original_path, staged_path = _stage_note_pdf(note)
+        note.pdf_filename = None
+        note.pdf_storage_name = None
+        db.commit()
+        if staged_path is not None:
+            staged_path.unlink(missing_ok=True)
+        return {"deleted": True, "note_id": note.id}
+    except Exception:
+        db.rollback()
+        _restore_staged_note_pdf(original_path, staged_path)
+        raise
     finally:
         db.close()
 
@@ -398,7 +543,7 @@ def update_note(note_id: int, request: NoteUpdate):
             setattr(note, field, value)
         db.commit()
         db.refresh(note)
-        return {"id": note.id, "title": note.title, "content": note.content, "subject": note.subject}
+        return _serialize_note(note)
     finally:
         db.close()
 
@@ -406,10 +551,22 @@ def update_note(note_id: int, request: NoteUpdate):
 @router.delete("/notes/{note_id}")
 def remove_note(note_id: int):
     db = next(get_db())
+    original_path = None
+    staged_path = None
     try:
-        if not crud.delete_note(db, note_id, USER_ID):
+        note = crud.get_note(db, note_id, USER_ID)
+        if note is None:
             raise HTTPException(status_code=404, detail="Note not found")
+        original_path, staged_path = _stage_note_pdf(note)
+        db.delete(note)
+        db.commit()
+        if staged_path is not None:
+            staged_path.unlink(missing_ok=True)
         return {"deleted": True}
+    except Exception:
+        db.rollback()
+        _restore_staged_note_pdf(original_path, staged_path)
+        raise
     finally:
         db.close()
 

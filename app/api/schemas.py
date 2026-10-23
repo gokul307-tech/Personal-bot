@@ -20,6 +20,7 @@ class ChatRequest(BaseModel):
     )
     conversation_id: int | None = Field(default=None, ge=1)
     source_filename: str | None = Field(default=None, max_length=255)
+    template: Literal["general", "study", "coding", "document"] = "general"
     preferences: "ChatPreferences" = Field(default_factory=lambda: ChatPreferences())
     auto_title: bool = True
     keep_attachment_context: bool = True
@@ -52,6 +53,7 @@ class ChatResponse(BaseModel):
 
 class ConversationCreate(BaseModel):
     title: str = Field(default="New Chat", max_length=255)
+    template: Literal["general", "study", "coding", "document"] = "general"
 
 
 class ConversationRename(BaseModel):
