@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#598556">
+  <title>Sign in | SAGE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/upgrades.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-panel" aria-labelledby="auth-title">
+      <img class="auth-logo" src="/assets/sage-logo.png" alt="SAGE logo">
+      <p class="eyebrow">YOUR PERSONAL STUDY SPACE</p>
+      <h1 id="auth-title">Welcome back</h1>
+      <p class="auth-description">Sign in to continue with your SAGE workspace.</p>
+      <div class="auth-tabs" role="tablist" aria-label="Account access">
+        <button type="button" class="auth-tab is-active" id="login-tab" role="tab" aria-selected="true">Sign in</button>
+        <button type="button" class="auth-tab" id="register-tab" role="tab" aria-selected="false">Create account</button>
+      </div>
+      <form id="auth-form" class="auth-form">
+        <label for="auth-username">Username</label>
+        <input id="auth-username" name="username" autocomplete="username" minlength="3" maxlength="32" required>
+        <label for="auth-password">Password</label>
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required>
+        <p class="auth-hint" id="auth-hint">Use your username and password to sign in.</p>
+        <p id="auth-error" class="auth-error" role="alert" hidden></p>
+        <button id="auth-submit" class="auth-submit" type="submit">Sign in</button>
+      </form>
+    </section>
+    <p class="auth-footer">SAGE · A quieter place to study</p>
+  </main>
+  <script src="/auth.js"></script>
+</body>
+</html>

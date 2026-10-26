@@ -17,6 +17,10 @@ VECTOR_STORE_DIR = DATA_DIR / "vector_store"
 EXPORTS_DIR = DATA_DIR / "exports"
 
 
+def documents_dir_for_user(user_id: int) -> Path:
+    return DOCUMENTS_DIR if user_id == 1 else DOCUMENTS_DIR / f"user_{user_id}"
+
+
 # ---------------------------------------------------------
 # Load environment variables
 # ---------------------------------------------------------
@@ -43,6 +47,12 @@ def _read_int_setting(name: str, default: int, minimum: int = 0) -> int:
     if value < minimum:
         raise ValueError(f"{name} must be at least {minimum}, got {value}.")
     return value
+
+
+AUTH_SESSION_DAYS = _read_int_setting("AUTH_SESSION_DAYS", 30, minimum=1)
+if AUTH_SESSION_DAYS > 365:
+    raise ValueError("AUTH_SESSION_DAYS must not exceed 365.")
+PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "").strip().rstrip("/") or None
 
 
 # ---------------------------------------------------------

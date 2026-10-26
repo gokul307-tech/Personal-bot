@@ -75,14 +75,34 @@ def clear_store() -> None:
         _save_store([])
 
 
-def get_all_documents() -> list[dict[str, Any]]:
-    return _load_store()
+def get_all_documents(owner_id: int | None = None) -> list[dict[str, Any]]:
+    documents = _load_store()
+    if owner_id is None:
+        return documents
+    return [item for item in documents if item.get("owner_id", 1) == owner_id]
 
 
-def delete_documents_by_filename(filename: str) -> int:
+def assign_legacy_owner(owner_id: int) -> int:
     with _STORE_LOCK:
         store = _load_store()
-        remaining = [item for item in store if item.get("filename") != filename]
+        assigned = 0
+        for document in store:
+            if "owner_id" not in document:
+                document["owner_id"] = owner_id
+                assigned += 1
+        if assigned:
+            _save_store(store)
+        return assigned
+
+
+def delete_documents_by_filename(filename: str, owner_id: int | None = None) -> int:
+    with _STORE_LOCK:
+        store = _load_store()
+        remaining = [
+            item for item in store
+            if item.get("filename") != filename
+            or (owner_id is not None and item.get("owner_id", 1) != owner_id)
+        ]
         deleted = len(store) - len(remaining)
         if deleted:
             _save_store(remaining)
@@ -128,6 +148,7 @@ def search(
     filename: str | None = None,
     query_text: str | None = None,
     page_number: int | None = None,
+    owner_id: int | None = None,
 ) -> list[dict[str, Any]]:
 
     if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
@@ -143,6 +164,9 @@ def search(
     scored = []
 
     for document in documents:
+
+        if owner_id is not None and document.get("owner_id", 1) != owner_id:
+            continue
 
         if document.get("private") and not filename:
             continue

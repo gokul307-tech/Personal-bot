@@ -5,8 +5,9 @@ from uuid import uuid4
 from app.config.settings import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
-    DOCUMENTS_DIR,
+    documents_dir_for_user,
 )
+from app.api.auth_context import current_user_id
 from app.rag.chunker import chunk_document_pages
 from app.rag.document_loader import load_document_pages
 from app.rag.retriever import retrieve
@@ -21,8 +22,10 @@ def ingest_document(
     file_path: str,
     *,
     private: bool = False,
+    owner_id: int | None = None,
 ) -> dict:
 
+    owner_id = current_user_id() if owner_id is None else owner_id
     path = Path(file_path).resolve()
 
     if not path.exists():
@@ -64,15 +67,16 @@ def ingest_document(
                     "text": chunk["text"],
                     "embedding": embedding,
                     "private": private,
+                    "owner_id": owner_id,
                     "page_number": chunk["page_number"],
                 }
             )
 
         previous_documents = [
-            item for item in get_all_documents()
+            item for item in get_all_documents(owner_id)
             if item.get("filename") == path.name
         ]
-        delete_documents_by_filename(path.name)
+        delete_documents_by_filename(path.name, owner_id)
         try:
             count = add_documents(documents)
         except Exception:
@@ -80,7 +84,7 @@ def ingest_document(
                 add_documents(previous_documents)
             raise
         if count != len(documents):
-            delete_documents_by_filename(path.name)
+            delete_documents_by_filename(path.name, owner_id)
             if previous_documents:
                 add_documents(previous_documents)
             raise RuntimeError("Vector-store count did not match document chunks.")
@@ -105,7 +109,7 @@ def ingest_project_document(
     filename: str,
 ) -> dict:
 
-    path = DOCUMENTS_DIR / filename
+    path = documents_dir_for_user(current_user_id()) / filename
 
     return ingest_document(str(path))
 
@@ -114,12 +118,16 @@ def search_knowledge(
     query: str,
     top_k: int = 5,
     filename: str | None = None,
+    owner_id: int | None = None,
 ) -> list[dict]:
+
+    owner_id = current_user_id() if owner_id is None else owner_id
 
     results = retrieve(
         query=query,
         top_k=top_k,
         filename=filename,
+        owner_id=owner_id,
     )
 
     return [

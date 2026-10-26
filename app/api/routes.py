@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.agent.agent import VDSSAgent
 from app.api.dependencies import get_agent
+from app.api.auth_context import current_user_id
 from app.api.schemas import (
     ChatRequest,
     ChatPreferences,
@@ -39,10 +40,14 @@ from app.services.study_plan_service import categorize_study_plans, generate_stu
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-USER_ID = 1
 CHAT_ATTACHMENTS_DIR = UPLOADS_DIR / "chat-attachments"
 NOTE_ATTACHMENTS_DIR = UPLOADS_DIR / "note-attachments"
 ATTACHMENT_MARKER = "\n\n<!--sage-attachments:"
+
+
+def _user_documents_dir(user_id: int | None = None) -> Path:
+    owner_id = current_user_id() if user_id is None else user_id
+    return DOCUMENTS_DIR if owner_id == 1 else DOCUMENTS_DIR / f"user_{owner_id}"
 
 
 def _message_attachments(content: str) -> list[dict]:
@@ -103,6 +108,8 @@ def _serialize_note(note: Note) -> dict:
 
 
 def _delete_conversation_attachments(conversation_id: int, db) -> None:
+    if crud.get_conversation(db, conversation_id, current_user_id()) is None:
+        return
     folder = CHAT_ATTACHMENTS_DIR / str(conversation_id)
     if not folder.exists():
         return
@@ -126,15 +133,15 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
     db = next(get_db())
     try:
         conversation = (
-            crud.get_conversation(db, request.conversation_id, USER_ID)
+            crud.get_conversation(db, request.conversation_id, current_user_id())
             if request.conversation_id
-            else crud.create_conversation(db, USER_ID, template=request.template)
+            else crud.create_conversation(db, current_user_id(), template=request.template)
         )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         if request.source_filename:
             safe_filename = Path(request.source_filename).name
-            library_path = DOCUMENTS_DIR / safe_filename
+            library_path = _user_documents_dir() / safe_filename
             attachment_path = CHAT_ATTACHMENTS_DIR / str(conversation.id) / safe_filename
             if safe_filename != request.source_filename or not (library_path.is_file() or attachment_path.is_file()):
                 raise HTTPException(status_code=404, detail="Selected document not found")
@@ -205,9 +212,9 @@ async def chat_with_attachment(
     message_saved = False
     try:
         conversation = (
-            crud.get_conversation(db, conversation_id, USER_ID)
+            crud.get_conversation(db, conversation_id, current_user_id())
             if conversation_id
-            else crud.create_conversation(db, USER_ID, template=template)
+            else crud.create_conversation(db, current_user_id(), template=template)
         )
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -225,9 +232,9 @@ async def chat_with_attachment(
         folder.mkdir(parents=True, exist_ok=True)
         stored_path = folder / source_filename
         stored_path.write_bytes(content)
-        ingestion = ingest_document(str(stored_path), private=True)
+        ingestion = ingest_document(str(stored_path), private=True, owner_id=current_user_id())
         if not ingestion.get("success"):
-            delete_documents_by_filename(source_filename)
+            delete_documents_by_filename(source_filename, current_user_id())
             stored_path.unlink(missing_ok=True)
             detail = ingestion.get("error")
             if not isinstance(detail, str) or not detail.strip():
@@ -276,7 +283,7 @@ async def chat_with_attachment(
         return {"response": response, "conversation_id": conversation.id}
     except Exception:
         if source_filename and not message_saved:
-            delete_documents_by_filename(source_filename)
+            delete_documents_by_filename(source_filename, current_user_id())
         if stored_path and not message_saved:
             stored_path.unlink(missing_ok=True)
         raise
@@ -289,7 +296,7 @@ def list_conversations():
     db = next(get_db())
     try:
         result = []
-        for item in crud.get_conversations(db, USER_ID):
+        for item in crud.get_conversations(db, current_user_id()):
             messages = crud.get_messages(db, item.id)
             result.append({
                 "id": item.id,
@@ -310,7 +317,7 @@ def create_conversation(request: ConversationCreate):
     try:
         item = crud.create_conversation(
             db,
-            USER_ID,
+            current_user_id(),
             request.title.strip() or "New Chat",
             request.template,
         )
@@ -329,7 +336,7 @@ def create_conversation(request: ConversationCreate):
 def get_conversation(conversation_id: int):
     db = next(get_db())
     try:
-        item = crud.get_conversation(db, conversation_id, USER_ID)
+        item = crud.get_conversation(db, conversation_id, current_user_id())
         if item is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return {
@@ -349,7 +356,7 @@ def get_conversation(conversation_id: int):
 def rename_conversation(conversation_id: int, request: ConversationRename):
     db = next(get_db())
     try:
-        item = crud.get_conversation(db, conversation_id, USER_ID)
+        item = crud.get_conversation(db, conversation_id, current_user_id())
         if item is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         item.title = request.title.strip()
@@ -364,7 +371,7 @@ def remove_conversation(conversation_id: int):
     db = next(get_db())
     try:
         _delete_conversation_attachments(conversation_id, db)
-        if not crud.delete_conversation(db, conversation_id, USER_ID):
+        if not crud.delete_conversation(db, conversation_id, current_user_id()):
             raise HTTPException(status_code=404, detail="Conversation not found")
         return {"deleted": True}
     finally:
@@ -375,9 +382,9 @@ def remove_conversation(conversation_id: int):
 def remove_all_conversations():
     db = next(get_db())
     try:
-        for conversation in crud.get_conversations(db, USER_ID):
+        for conversation in crud.get_conversations(db, current_user_id()):
             _delete_conversation_attachments(conversation.id, db)
-        return {"deleted": crud.delete_all_conversations(db, USER_ID)}
+        return {"deleted": crud.delete_all_conversations(db, current_user_id())}
     finally:
         db.close()
 
@@ -386,7 +393,7 @@ def remove_all_conversations():
 def list_notes(q: str | None = None):
     db = next(get_db())
     try:
-        notes = crud.get_notes(db, user_id=USER_ID)
+        notes = crud.get_notes(db, user_id=current_user_id())
         if q:
             query = q.casefold()
             notes = [
@@ -406,7 +413,7 @@ def list_note_pdfs(q: str | None = None):
     db = next(get_db())
     try:
         results = []
-        for note in crud.get_notes(db, user_id=USER_ID):
+        for note in crud.get_notes(db, user_id=current_user_id()):
             if not note.pdf_storage_name:
                 continue
             if q and q.casefold() not in (note.pdf_filename or "").casefold() and q.casefold() not in note.title.casefold():
@@ -432,7 +439,7 @@ def list_note_pdfs(q: str | None = None):
 def create_note(request: NoteCreate):
     db = next(get_db())
     try:
-        note = crud.create_note(db, request.title, request.content, request.subject, USER_ID)
+        note = crud.create_note(db, request.title, request.content, request.subject, current_user_id())
         return _serialize_note(note)
     finally:
         db.close()
@@ -474,7 +481,7 @@ async def create_note_with_pdf(
             normalized_title,
             content.strip(),
             subject.strip() if subject and subject.strip() else None,
-            USER_ID,
+            current_user_id(),
             safe_filename,
             storage_name,
         )
@@ -492,7 +499,7 @@ async def create_note_with_pdf(
 def open_note_pdf(note_id: int):
     db = next(get_db())
     try:
-        note = crud.get_note(db, note_id, USER_ID)
+        note = crud.get_note(db, note_id, current_user_id())
         if note is None or not note.pdf_storage_name:
             raise HTTPException(status_code=404, detail="Note PDF not found")
         path = _note_pdf_path(note)
@@ -514,7 +521,7 @@ def remove_note_pdf(note_id: int):
     original_path = None
     staged_path = None
     try:
-        note = crud.get_note(db, note_id, USER_ID)
+        note = crud.get_note(db, note_id, current_user_id())
         if note is None or not note.pdf_storage_name:
             raise HTTPException(status_code=404, detail="Note PDF not found")
         original_path, staged_path = _stage_note_pdf(note)
@@ -536,7 +543,7 @@ def remove_note_pdf(note_id: int):
 def update_note(note_id: int, request: NoteUpdate):
     db = next(get_db())
     try:
-        note = crud.get_note(db, note_id, USER_ID)
+        note = crud.get_note(db, note_id, current_user_id())
         if note is None:
             raise HTTPException(status_code=404, detail="Note not found")
         for field, value in request.model_dump(exclude_unset=True).items():
@@ -554,7 +561,7 @@ def remove_note(note_id: int):
     original_path = None
     staged_path = None
     try:
-        note = crud.get_note(db, note_id, USER_ID)
+        note = crud.get_note(db, note_id, current_user_id())
         if note is None:
             raise HTTPException(status_code=404, detail="Note not found")
         original_path, staged_path = _stage_note_pdf(note)
@@ -575,7 +582,7 @@ def remove_note(note_id: int):
 def list_study_plans():
     db = next(get_db())
     try:
-        return [_serialize_study_plan(plan) for plan in crud.get_study_plans(db, USER_ID)]
+        return [_serialize_study_plan(plan) for plan in crud.get_study_plans(db, current_user_id())]
     finally:
         db.close()
 
@@ -594,7 +601,7 @@ def _serialize_study_plan(plan: StudyPlan) -> dict:
 
 
 def _save_study_plan_tasks(db, tasks: list[dict]) -> tuple[list[StudyPlan], int]:
-    existing = crud.get_study_plans(db, USER_ID)
+    existing = crud.get_study_plans(db, current_user_id())
 
     def signature(title: str, subject: str | None, scheduled_at: datetime | None) -> tuple[str, str, str | None]:
         return (
@@ -621,7 +628,7 @@ def _save_study_plan_tasks(db, tasks: list[dict]) -> tuple[list[StudyPlan], int]
             subject=task.get("subject"),
             description=task.get("description"),
             scheduled_at=scheduled_at,
-            user_id=USER_ID,
+            user_id=current_user_id(),
             priority=task.get("priority", "medium"),
             estimated_minutes=task.get("estimated_minutes", 60),
         ))
@@ -641,7 +648,7 @@ def _save_study_plan_tasks(db, tasks: list[dict]) -> tuple[list[StudyPlan], int]
 def study_plan_statistics(today: date | None = None):
     db = next(get_db())
     try:
-        plans = [_serialize_study_plan(plan) for plan in crud.get_study_plans(db, USER_ID)]
+        plans = [_serialize_study_plan(plan) for plan in crud.get_study_plans(db, current_user_id())]
         return categorize_study_plans(plans, today or date.today())
     finally:
         db.close()
@@ -658,7 +665,7 @@ def create_study_plan(request: StudyPlanCreate):
             request.subject,
             request.description,
             scheduled_at,
-            USER_ID,
+            current_user_id(),
             request.priority,
             request.estimated_minutes,
         )
@@ -715,7 +722,7 @@ def update_study_plan(
     db = next(get_db())
     try:
         plan = db.get(StudyPlan, plan_id)
-        if plan is None or plan.user_id != USER_ID:
+        if plan is None or plan.user_id != current_user_id():
             raise HTTPException(status_code=404, detail="Study plan not found")
         updates = request.model_dump(exclude_unset=True) if request else {}
         if completed is not None:
@@ -739,7 +746,7 @@ def delete_study_plan(plan_id: int):
     db = next(get_db())
     try:
         plan = db.get(StudyPlan, plan_id)
-        if plan is None or plan.user_id != USER_ID:
+        if plan is None or plan.user_id != current_user_id():
             raise HTTPException(status_code=404, detail="Study plan not found")
         db.delete(plan)
         db.commit()
@@ -752,7 +759,7 @@ def delete_study_plan(plan_id: int):
 def list_memories(q: str | None = None):
     db = next(get_db())
     try:
-        memories = crud.get_memories(db, user_id=USER_ID)
+        memories = crud.get_memories(db, user_id=current_user_id())
         if q:
             query = q.casefold()
             memories = [item for item in memories if query in item.content.casefold()]
@@ -765,7 +772,7 @@ def list_memories(q: str | None = None):
 def create_memory(request: MemoryCreate):
     db = next(get_db())
     try:
-        item = crud.create_memory(db, request.content, request.memory_type, request.importance, USER_ID)
+        item = crud.create_memory(db, request.content, request.memory_type, request.importance, current_user_id())
         return {"id": item.id, "content": item.content, "memory_type": item.memory_type, "importance": item.importance, "created_at": item.created_at}
     finally:
         db.close()
@@ -775,7 +782,7 @@ def create_memory(request: MemoryCreate):
 def remove_memory(memory_id: int):
     db = next(get_db())
     try:
-        if not crud.delete_memory(db, memory_id, USER_ID):
+        if not crud.delete_memory(db, memory_id, current_user_id()):
             raise HTTPException(status_code=404, detail="Memory not found")
         return {"deleted": True}
     finally:
@@ -784,10 +791,12 @@ def remove_memory(memory_id: int):
 
 @router.get("/documents")
 def list_documents(q: str | None = None):
-    indexed = {item.get("filename") for item in get_all_documents()}
+    owner_id = current_user_id()
+    documents_dir = _user_documents_dir(owner_id)
+    indexed = {item.get("filename") for item in get_all_documents(owner_id)}
     documents = []
-    if DOCUMENTS_DIR.exists():
-        for path in DOCUMENTS_DIR.iterdir():
+    if documents_dir.exists():
+        for path in documents_dir.iterdir():
             if not path.is_file() or path.name.startswith(".") or (q and q.casefold() not in path.name.casefold()):
                 continue
             documents.append({
@@ -802,7 +811,7 @@ def list_documents(q: str | None = None):
     db = next(get_db())
     try:
         seen = set()
-        for conversation in crud.get_conversations(db, USER_ID):
+        for conversation in crud.get_conversations(db, owner_id):
             folder = CHAT_ATTACHMENTS_DIR / str(conversation.id)
             for message in crud.get_messages(db, conversation.id):
                 for attachment in _message_attachments(message.content):
@@ -835,7 +844,7 @@ def open_document(filename: str):
     safe_name = Path(filename).name
     if safe_name != filename:
         raise HTTPException(status_code=400, detail="Invalid document name")
-    target = DOCUMENTS_DIR / safe_name
+    target = _user_documents_dir() / safe_name
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Document not found")
     media_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
@@ -852,15 +861,18 @@ def upload_document(file: UploadFile = File(...)):
     content = file.file.read(max_bytes + 1)
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail="Document is too large")
-    target = DOCUMENTS_DIR / safe_name
+    documents_dir = _user_documents_dir()
+    documents_dir.mkdir(parents=True, exist_ok=True)
+    target = documents_dir / safe_name
     previous_content = target.read_bytes() if target.exists() else None
-    previous_documents = [item for item in get_all_documents() if item.get("filename") == safe_name]
-    temporary = DOCUMENTS_DIR / f".{uuid4().hex}{target.suffix}"
+    owner_id = current_user_id()
+    previous_documents = [item for item in get_all_documents(owner_id) if item.get("filename") == safe_name]
+    temporary = documents_dir / f".{uuid4().hex}{target.suffix}"
     try:
         temporary.write_bytes(content)
         temporary.replace(target)
-        delete_documents_by_filename(safe_name)
-        ingestion = ingest_document(str(target))
+        delete_documents_by_filename(safe_name, owner_id)
+        ingestion = ingest_document(str(target), owner_id=owner_id)
         if not ingestion.get("success"):
             detail = ingestion.get("error")
             if not isinstance(detail, str) or not detail.strip():
@@ -870,10 +882,10 @@ def upload_document(file: UploadFile = File(...)):
         if previous_content is None:
             target.unlink(missing_ok=True)
         else:
-            restore = DOCUMENTS_DIR / f".{uuid4().hex}{target.suffix}"
+            restore = documents_dir / f".{uuid4().hex}{target.suffix}"
             restore.write_bytes(previous_content)
             restore.replace(target)
-        delete_documents_by_filename(safe_name)
+        delete_documents_by_filename(safe_name, owner_id)
         if previous_documents:
             add_documents(previous_documents)
         raise
@@ -887,16 +899,16 @@ def remove_document(filename: str):
     safe_name = Path(filename).name
     if safe_name != filename:
         raise HTTPException(status_code=400, detail="Invalid document name")
-    target = DOCUMENTS_DIR / safe_name
+    target = _user_documents_dir() / safe_name
     if target.is_file():
         target.unlink()
-        delete_documents_by_filename(safe_name)
+        delete_documents_by_filename(safe_name, current_user_id())
         return {"deleted": True, "filename": safe_name}
 
     db = next(get_db())
     try:
         matches = {}
-        for conversation in crud.get_conversations(db, USER_ID):
+        for conversation in crud.get_conversations(db, current_user_id()):
             for message in crud.get_messages(db, conversation.id):
                 for attachment in _message_attachments(message.content):
                     if attachment.get("filename") == safe_name:
@@ -912,7 +924,7 @@ def remove_document(filename: str):
             conversation_id, source = next(iter(matches))
             _delete_chat_attachment(conversation_id, source, db)
         else:
-            delete_documents_by_filename(safe_name)
+            delete_documents_by_filename(safe_name, current_user_id())
         return {"deleted": True, "filename": safe_name}
     except Exception:
         db.rollback()
@@ -926,7 +938,7 @@ def _delete_chat_attachment(conversation_id: int, source: str, db) -> None:
     if not safe_source or safe_source != source:
         raise HTTPException(status_code=400, detail="Invalid attachment name")
 
-    conversation = crud.get_conversation(db, conversation_id, USER_ID)
+    conversation = crud.get_conversation(db, conversation_id, current_user_id())
     if conversation is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
@@ -946,7 +958,7 @@ def _delete_chat_attachment(conversation_id: int, source: str, db) -> None:
         raise HTTPException(status_code=400, detail="Invalid attachment path") from exc
 
     target.unlink(missing_ok=True)
-    delete_documents_by_filename(safe_source)
+    delete_documents_by_filename(safe_source, current_user_id())
     for message, attachments in matching_messages:
         remaining = [item for item in attachments if item.get("source") != safe_source]
         text = _message_text(message.content)

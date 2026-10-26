@@ -10,6 +10,7 @@ def retrieve(
     top_k: int = 5,
     minimum_score: float = 0.25,
     filename: str | None = None,
+    owner_id: int | None = None,
 ) -> list[dict]:
 
     if (
@@ -45,6 +46,7 @@ def retrieve(
         filename=filename,
         query_text=retrieval_query,
         page_number=page_number,
+        owner_id=owner_id,
     )
 
     return [

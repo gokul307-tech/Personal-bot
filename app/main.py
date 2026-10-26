@@ -1,14 +1,16 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from app.config.settings import BASE_DIR, validate_settings
 
 from app.api.routes import router
+from app.api.auth import SESSION_COOKIE_NAME, require_authenticated, resolve_session_user, router as auth_router
 from app.config.settings import APP_NAME
-from app.database.database import create_tables
+from app.database.database import create_tables, get_db
+from app.config.settings import APP_ENV
 
 
 logger = logging.getLogger(__name__)
@@ -49,12 +51,27 @@ def create_app() -> FastAPI:
         )
 
     @application.get("/")
-    def root():
-        return FileResponse(BASE_DIR / "frontend" / "index.html")
+    @application.get("/index.html")
+    def frontend_shell(request: Request, response: Response, db=Depends(get_db)):
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        if resolve_session_user(db, token) is not None:
+            return FileResponse(BASE_DIR / "frontend" / "index.html")
+        login_page = FileResponse(BASE_DIR / "frontend" / "login.html")
+        if token:
+            login_page.delete_cookie(
+                SESSION_COOKIE_NAME,
+                path="/",
+                httponly=True,
+                secure=APP_ENV in {"production", "prod"},
+                samesite="lax",
+            )
+        return login_page
 
+    application.include_router(auth_router, prefix="/api")
     application.include_router(
         router,
         prefix="/api",
+        dependencies=[Depends(require_authenticated)],
     )
 
     application.mount(

@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -59,6 +60,38 @@ def create_tables():
     from app.database import models
 
     Base.metadata.create_all(bind=engine)
+    if "users" in inspect(engine).get_table_names():
+        columns = {column["name"] for column in inspect(engine).get_columns("users")}
+        legacy_auth_migration = "is_legacy" not in columns
+        with engine.begin() as connection:
+            if "username" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR(32)"))
+            if "password_hash" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))
+            if legacy_auth_migration:
+                connection.execute(text("ALTER TABLE users ADD COLUMN is_legacy BOOLEAN NOT NULL DEFAULT 1"))
+            if legacy_auth_migration:
+                connection.execute(text("UPDATE users SET is_legacy = 1, password_hash = NULL"))
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON users (username)"
+            ))
+            if connection.execute(text("SELECT 1 FROM users WHERE id = 1")).first() is None:
+                connection.execute(text(
+                    "INSERT INTO users (id, name, email, username, password_hash, is_legacy, created_at) "
+                    "VALUES (1, 'Legacy Local Data', NULL, NULL, NULL, 1, :created_at)"
+                ), {"created_at": datetime.utcnow()})
+
+    for table in ("notes", "marks", "study_plans", "memories", "reminders", "calendar_events"):
+        if table in inspect(engine).get_table_names():
+            columns = {column["name"] for column in inspect(engine).get_columns(table)}
+            if "user_id" in columns:
+                with engine.begin() as connection:
+                    connection.execute(text(f"UPDATE {table} SET user_id = 1 WHERE user_id IS NULL"))
+    if "conversations" in inspect(engine).get_table_names():
+        columns = {column["name"] for column in inspect(engine).get_columns("conversations")}
+        if "user_id" in columns:
+            with engine.begin() as connection:
+                connection.execute(text("UPDATE conversations SET user_id = 1 WHERE user_id IS NULL"))
     if "study_plans" in inspect(engine).get_table_names():
         columns = {column["name"] for column in inspect(engine).get_columns("study_plans")}
         if "priority" not in columns:
@@ -86,3 +119,6 @@ def create_tables():
                 connection.execute(text(
                     "ALTER TABLE conversations ADD COLUMN template VARCHAR(20) NOT NULL DEFAULT 'general'"
                 ))
+    from app.rag.vector_store import assign_legacy_owner
+
+    assign_legacy_owner(1)
