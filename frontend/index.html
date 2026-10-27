@@ -27,6 +27,7 @@
       <div class="sidebar-spacer"></div>
       <button class="nav-item" id="theme-toggle" title="Toggle theme"><span>◐</span><b id="theme-label">Dark mode</b></button>
       <button class="nav-item" data-view="settings" title="Settings"><span>⚙</span><b>Settings</b></button>
+      <button class="nav-item" id="logout-button" type="button" title="Log out"><span>↪</span><b>Log out</b></button>
       <button class="profile" data-view="profile" title="Student profile"><span class="avatar">S</span><span class="profile-copy"><strong>Student</strong><small>Personal workspace</small></span><i></i></button>
     </aside>
 
@@ -45,6 +46,7 @@
     <aside class="history-panel" id="history-panel" aria-label="Conversation history"><div class="history-head"><div><p class="eyebrow">YOUR SPACE</p><h2>History</h2></div><button class="icon-btn" id="history-collapse" aria-label="Close history">›</button></div><label class="search-box"><span>⌕</span><input id="history-search" type="search" placeholder="Search conversations..." aria-label="Search conversations"></label><div class="history-list" id="history-list"></div><div class="history-footer"><span id="history-count">0 conversations</span><button id="clear-history">Delete all</button></div></aside>
   </div>
   <div class="conversation-delete-modal" id="conversation-delete-modal" hidden><section class="conversation-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="conversation-delete-title"><h2 id="conversation-delete-title">Delete conversation?</h2><p id="conversation-delete-copy">Its messages and attachments will be removed. This cannot be undone.</p><div class="conversation-delete-actions"><button type="button" id="conversation-delete-cancel">Cancel</button><button type="button" id="conversation-delete-confirm">Delete</button></div></section></div><div class="mobile-scrim" id="mobile-scrim"></div><div class="toast" id="toast" role="status"></div>
+  <script src="/auth-session.js"></script>
   <script src="/app.js?v=20261019-document-delete"></script>
   <script src="/upgrades.js?v=20261019-document-delete"></script>
 </body>

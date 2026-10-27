@@ -81,17 +81,33 @@ def create_tables():
                     "VALUES (1, 'Legacy Local Data', NULL, NULL, NULL, 1, :created_at)"
                 ), {"created_at": datetime.utcnow()})
 
-    for table in ("notes", "marks", "study_plans", "memories", "reminders", "calendar_events"):
+    owned_tables = (
+        "notes",
+        "marks",
+        "study_plans",
+        "memories",
+        "reminders",
+        "calendar_events",
+        "conversations",
+    )
+    for table in owned_tables:
         if table in inspect(engine).get_table_names():
             columns = {column["name"] for column in inspect(engine).get_columns(table)}
-            if "user_id" in columns:
-                with engine.begin() as connection:
-                    connection.execute(text(f"UPDATE {table} SET user_id = 1 WHERE user_id IS NULL"))
-    if "conversations" in inspect(engine).get_table_names():
-        columns = {column["name"] for column in inspect(engine).get_columns("conversations")}
-        if "user_id" in columns:
             with engine.begin() as connection:
-                connection.execute(text("UPDATE conversations SET user_id = 1 WHERE user_id IS NULL"))
+                if "user_id" not in columns:
+                    nullability = " NOT NULL DEFAULT 1" if table == "conversations" else ""
+                    connection.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER{nullability}")
+                    )
+                connection.execute(
+                    text(f"UPDATE {table} SET user_id = 1 WHERE user_id IS NULL")
+                )
+                connection.execute(
+                    text(
+                        f"CREATE INDEX IF NOT EXISTS ix_{table}_user_id "
+                        f"ON {table} (user_id)"
+                    )
+                )
     if "study_plans" in inspect(engine).get_table_names():
         columns = {column["name"] for column in inspect(engine).get_columns("study_plans")}
         if "priority" not in columns:

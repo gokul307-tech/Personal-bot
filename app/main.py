@@ -39,6 +39,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @application.middleware("http")
+    async def disable_private_response_caching(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/api/") or request.url.path in {
+            "/",
+            "/index.html",
+            "/login.html",
+        }:
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @application.exception_handler(Exception)
     async def handle_unexpected_error(_request: Request, exc: Exception):
         logger.error(
@@ -52,6 +63,7 @@ def create_app() -> FastAPI:
 
     @application.get("/")
     @application.get("/index.html")
+    @application.get("/login.html")
     def frontend_shell(request: Request, response: Response, db=Depends(get_db)):
         token = request.cookies.get(SESSION_COOKIE_NAME)
         if resolve_session_user(db, token) is not None:

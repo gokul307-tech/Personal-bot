@@ -261,9 +261,13 @@ def test_document_retrieval_miss_does_not_claim_content_is_absent(monkeypatch):
 def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatch):
 	monkeypatch.setattr(routes, "DOCUMENTS_DIR", tmp_path)
 	deleted = []
-	monkeypatch.setattr(routes, "delete_documents_by_filename", deleted.append)
-	monkeypatch.setattr(routes, "get_all_documents", lambda: [{"filename": "ready.txt"}])
-	monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": True, "chunks_added": 1})
+	monkeypatch.setattr(
+		routes,
+		"delete_documents_by_filename",
+		lambda filename, *_args, **_kwargs: deleted.append(filename),
+	)
+	monkeypatch.setattr(routes, "get_all_documents", lambda *_args, **_kwargs: [{"filename": "ready.txt"}])
+	monkeypatch.setattr(routes, "ingest_document", lambda _path, **_kwargs: {"success": True, "chunks_added": 1})
 
 	with TestClient(app) as client:
 		uploaded = client.post("/api/documents", files={"file": ("ready.txt", b"study text")})
@@ -284,7 +288,7 @@ def test_document_upload_list_failure_and_individual_delete(tmp_path, monkeypatc
 		assert (tmp_path / "ready.txt").read_bytes() == b"updated study text"
 		assert len(client.get("/api/documents?q=ready.txt").json()) == 1
 
-		monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": False, "error": "internal detail"})
+		monkeypatch.setattr(routes, "ingest_document", lambda _path, **_kwargs: {"success": False, "error": "internal detail"})
 		failed = client.post("/api/documents", files={"file": ("failed.txt", b"bad document")})
 		assert failed.status_code == 422
 		assert failed.json()["detail"] == "internal detail"
@@ -306,13 +310,13 @@ def test_failed_document_replacement_restores_file_and_index(tmp_path, monkeypat
 	monkeypatch.setattr(routes, "DOCUMENTS_DIR", tmp_path)
 	stored = [{"filename": "study.txt", "text": "previous index", "embedding": [1.0]}]
 
-	def delete_documents(filename):
+	def delete_documents(filename, *_args, **_kwargs):
 		stored[:] = [item for item in stored if item["filename"] != filename]
 
-	monkeypatch.setattr(routes, "get_all_documents", lambda: list(stored))
+	monkeypatch.setattr(routes, "get_all_documents", lambda *_args, **_kwargs: list(stored))
 	monkeypatch.setattr(routes, "delete_documents_by_filename", delete_documents)
 	monkeypatch.setattr(routes, "add_documents", lambda documents: stored.extend(documents))
-	monkeypatch.setattr(routes, "ingest_document", lambda _path: {"success": False})
+	monkeypatch.setattr(routes, "ingest_document", lambda _path, **_kwargs: {"success": False})
 	(tmp_path / "study.txt").write_bytes(b"previous file")
 
 	with TestClient(app) as client:
@@ -438,11 +442,11 @@ def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monk
 	monkeypatch.setattr(routes, "CHAT_ATTACHMENTS_DIR", tmp_path / "chat-attachments")
 	ingested = []
 	indexed = []
-	monkeypatch.setattr(routes, "get_all_documents", lambda: [{"filename": name} for name in indexed])
+	monkeypatch.setattr(routes, "get_all_documents", lambda *_args, **_kwargs: [{"filename": name} for name in indexed])
 	monkeypatch.setattr(
 		routes,
 		"delete_documents_by_filename",
-		lambda filename: indexed.remove(filename) if filename in indexed else 0,
+		lambda filename, *_args, **_kwargs: indexed.remove(filename) if filename in indexed else 0,
 	)
 	def ingest(path, **kwargs):
 		ingested.append((path, kwargs))
@@ -470,7 +474,7 @@ def test_chat_attachment_uses_existing_conversation_and_is_reused(tmp_path, monk
 			)
 			assert response.status_code == 200
 			assert response.json()["conversation_id"] == conversation_id
-			assert ingested[0][1] == {"private": True}
+			assert ingested[0][1] == {"private": True, "owner_id": 1}
 			assert calls[0]["user_message"] == "Explain this page"
 			assert calls[0]["source_filename"].startswith("attachment_")
 			assert calls[0]["conversation_messages"][-1]["content"] == "Explain this page"

@@ -118,7 +118,7 @@ def _delete_conversation_attachments(conversation_id: int, db) -> None:
             filename = Path(str(attachment.get("source", ""))).name
             if not filename:
                 continue
-            delete_documents_by_filename(filename)
+            delete_documents_by_filename(filename, current_user_id())
             (folder / filename).unlink(missing_ok=True)
     shutil.rmtree(folder, ignore_errors=True)
 

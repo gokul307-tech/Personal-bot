@@ -723,3 +723,30 @@ SAGE:
 Creates a reminder.
 
 This is the point where SAGE becomes more than a chatbot.
+
+## Authentication and data ownership
+
+SAGE supports local username/password accounts. Passwords are hashed with Werkzeug's
+scrypt implementation. The browser receives a random, HttpOnly session cookie; only
+a hash of its token is stored in the database. Sessions last 30 days by default and
+are revoked on logout.
+
+Configure authentication in `.env`:
+
+```env
+APP_ENV=development
+AUTH_SESSION_DAYS=30
+PUBLIC_ORIGIN=
+```
+
+Set `APP_ENV=production` when deployed over HTTPS so the session cookie receives the
+`Secure` attribute. In production, set `PUBLIC_ORIGIN` to the exact public origin
+(for example, `https://sage.example.com`) so state-changing requests can be checked
+against it. `AUTH_SESSION_DAYS` accepts values from 1 to 365.
+
+On startup, database migration adds missing ownership columns and assigns existing
+unowned database rows to a non-loginable legacy owner (user ID 1). Existing vector
+documents without an owner are assigned to that same legacy owner. Legacy records
+and files are preserved, but are not exposed to newly registered accounts; they are
+not automatically transferred to the first account. Review and explicitly migrate
+any legacy data before making it available to a real user.

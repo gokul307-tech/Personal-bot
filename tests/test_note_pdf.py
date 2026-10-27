@@ -90,7 +90,7 @@ def test_note_pdfs_have_a_separate_uploads_list(tmp_path, monkeypatch):
     _database(monkeypatch)
     monkeypatch.setattr(routes, "NOTE_ATTACHMENTS_DIR", tmp_path / "uploads" / "note-attachments")
     monkeypatch.setattr(routes, "DOCUMENTS_DIR", tmp_path / "documents")
-    monkeypatch.setattr(routes, "get_all_documents", lambda: [])
+    monkeypatch.setattr(routes, "get_all_documents", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(pdf_reader, "DATA_DIR", tmp_path)
     pdf_path = tmp_path / "handout.pdf"
     _write_text_pdf(pdf_path)
