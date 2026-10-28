@@ -350,11 +350,11 @@ def test_legacy_rows_migrate_to_unavailable_legacy_owner(monkeypatch, tmp_path):
 def test_legacy_vector_documents_are_not_visible_to_new_users(monkeypatch, tmp_path):
     monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
     vector_store.add_documents([
-        {"filename": "legacy.txt", "text": "old private content"},
+        {"filename": "legacy.txt", "text": "legacy_only_material"},
         {"filename": "owned.txt", "owner_id": 2, "text": "new private content"},
     ])
 
     assert vector_store.assign_legacy_owner(1) == 1
     assert [item["filename"] for item in vector_store.get_all_documents(1)] == ["legacy.txt"]
     assert [item["filename"] for item in vector_store.get_all_documents(2)] == ["owned.txt"]
-    assert vector_store.search([], query_text="old private content", owner_id=2) == []
+    assert vector_store.search([], query_text="legacy_only_material", owner_id=2) == []
