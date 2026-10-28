@@ -10,6 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/upgrades.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.css" integrity="sha384-WwGtaC6ywCHxA5cstpj/3+xIZvTez8dq2IcBQaXRkenHZ7FVVq1ZROtURwfbtTlG" crossorigin="anonymous">
+  <link rel="stylesheet" href="/math-formatting.css">
 </head>
 <body>
   <div class="app-shell" id="app-shell">
@@ -47,7 +49,9 @@
   </div>
   <div class="conversation-delete-modal" id="conversation-delete-modal" hidden><section class="conversation-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="conversation-delete-title"><h2 id="conversation-delete-title">Delete conversation?</h2><p id="conversation-delete-copy">Its messages and attachments will be removed. This cannot be undone.</p><div class="conversation-delete-actions"><button type="button" id="conversation-delete-cancel">Cancel</button><button type="button" id="conversation-delete-confirm">Delete</button></div></section></div><div class="mobile-scrim" id="mobile-scrim"></div><div class="toast" id="toast" role="status"></div>
   <script src="/auth-session.js"></script>
-  <script src="/app.js?v=20261019-document-delete"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.js" integrity="sha384-a1WQdjRj162i159OYq041X6I4K8NenkrI09LlPmiHg0YOb7CR+wJOraXwK9abpnE" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/contrib/auto-render.min.js" integrity="sha384-bjyGPfbij8/NDKJhSGZNP/khQVgtHUE5exjm4Ydllo42FwIgYsdLO2lXGmRBf5Mz" crossorigin="anonymous"></script>
+  <script src="/app.js?v=20261028-math-formatting-3"></script>
   <script src="/upgrades.js?v=20261019-document-delete"></script>
 </body>
 </html>
