@@ -8,15 +8,32 @@ from app.agent.executor import ToolExecutor
 from app.agent.registry import create_default_registry
 import app.database.database as database
 from app.api.dependencies import get_agent
+from app.api.auth import get_db as auth_get_db, require_authenticated
 from app.api.schemas import NoteUpdate
 from app.main import app, create_app
 
 
 def test_health_endpoint():
-    with TestClient(app) as client:
+    auth_override = app.dependency_overrides.pop(require_authenticated, None)
+    missing = object()
+    db_override = app.dependency_overrides.get(auth_get_db, missing)
+    app.dependency_overrides[auth_get_db] = lambda: None
+    client = TestClient(app)
+    try:
         response = client.get("/api/health")
         assert response.status_code == 200
-        assert response.json()["status"] == "ok"
+        assert response.json() == {"status": "ok"}
+
+        private_response = client.get("/api/conversations")
+        assert private_response.status_code == 401
+    finally:
+        client.close()
+        if auth_override is not None:
+            app.dependency_overrides[require_authenticated] = auth_override
+        if db_override is missing:
+            app.dependency_overrides.pop(auth_get_db, None)
+        else:
+            app.dependency_overrides[auth_get_db] = db_override
 
 
 def test_database_initialization_runs_during_application_startup(monkeypatch):
