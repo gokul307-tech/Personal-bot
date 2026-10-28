@@ -128,7 +128,7 @@ def create_default_registry() -> ToolRegistry:
         parameters={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Absolute or project-relative file path."}
+                "file_path": {"type": "string", "description": "Path to a supported file in your uploaded documents."}
             },
             "required": ["file_path"],
         },
@@ -141,7 +141,7 @@ def create_default_registry() -> ToolRegistry:
         parameters={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Path to the PDF file."}
+                "file_path": {"type": "string", "description": "Path to a PDF in your uploaded documents."}
             },
             "required": ["file_path"],
         },
@@ -157,7 +157,6 @@ def create_default_registry() -> ToolRegistry:
                 "title": {"type": "string"},
                 "content": {"type": "string"},
                 "subject": {"type": "string"},
-                "user_id": {"type": "integer"},
             },
             "required": ["title", "content"],
         },
@@ -171,7 +170,6 @@ def create_default_registry() -> ToolRegistry:
             "type": "object",
             "properties": {
                 "subject": {"type": "string"},
-                "user_id": {"type": "integer"},
             },
         },
         function=list_notes,
@@ -187,7 +185,6 @@ def create_default_registry() -> ToolRegistry:
                 "marks_obtained": {"type": "number"},
                 "maximum_marks": {"type": "number"},
                 "exam_name": {"type": "string"},
-                "user_id": {"type": "integer"},
             },
             "required": ["subject", "marks_obtained", "maximum_marks"],
         },
@@ -201,7 +198,6 @@ def create_default_registry() -> ToolRegistry:
             "type": "object",
             "properties": {
                 "subject": {"type": "string"},
-                "user_id": {"type": "integer"},
             },
         },
         function=list_marks,
@@ -217,7 +213,6 @@ def create_default_registry() -> ToolRegistry:
                 "subject": {"type": "string"},
                 "description": {"type": "string"},
                 "scheduled_at": {"type": "string", "description": "ISO datetime string."},
-                "user_id": {"type": "integer"},
             },
             "required": ["title"],
         },
@@ -229,9 +224,7 @@ def create_default_registry() -> ToolRegistry:
         description="Retrieve existing study plans for the student.",
         parameters={
             "type": "object",
-            "properties": {
-                "user_id": {"type": "integer"},
-            },
+            "properties": {},
         },
         function=list_plans,
     )
@@ -298,7 +291,12 @@ def create_default_registry() -> ToolRegistry:
         description="Analyze a CSV file statistically without executing code.",
         parameters={
             "type": "object",
-            "properties": {"file_path": {"type": "string"}},
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to a CSV in your uploaded documents.",
+                }
+            },
             "required": ["file_path"],
         },
         function=analyze_csv,
@@ -324,7 +322,6 @@ def create_default_registry() -> ToolRegistry:
                 "content": {"type": "string"},
                 "memory_type": {"type": "string"},
                 "importance": {"type": "number"},
-                "user_id": {"type": "integer"},
             },
             "required": ["content"],
         },
@@ -339,7 +336,6 @@ def create_default_registry() -> ToolRegistry:
             "properties": {
                 "memory_type": {"type": "string"},
                 "query": {"type": "string", "description": "Optional words to match in saved memories."},
-                "user_id": {"type": "integer"},
             },
         },
         function=recall_information,
@@ -354,7 +350,6 @@ def create_default_registry() -> ToolRegistry:
                 "title": {"type": "string"},
                 "remind_at": {"type": "string", "description": "ISO datetime string."},
                 "description": {"type": "string"},
-                "user_id": {"type": "integer"},
             },
             "required": ["title", "remind_at"],
         },
@@ -366,7 +361,7 @@ def create_default_registry() -> ToolRegistry:
         description="List upcoming reminders for the student.",
         parameters={
             "type": "object",
-            "properties": {"user_id": {"type": "integer"}},
+            "properties": {},
         },
         function=list_reminders,
     )
@@ -381,7 +376,6 @@ def create_default_registry() -> ToolRegistry:
                 "start_time": {"type": "string", "description": "ISO datetime string."},
                 "end_time": {"type": "string", "description": "ISO datetime string."},
                 "description": {"type": "string"},
-                "user_id": {"type": "integer"},
             },
             "required": ["title", "start_time"],
         },
@@ -393,7 +387,7 @@ def create_default_registry() -> ToolRegistry:
         description="List calendar events for the student.",
         parameters={
             "type": "object",
-            "properties": {"user_id": {"type": "integer"}},
+            "properties": {},
         },
         function=list_events,
     )
