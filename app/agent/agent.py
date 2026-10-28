@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.agent.executor import ToolExecutor
 from app.agent.planner import AgentPlanner
 from app.agent.registry import ToolRegistry
@@ -90,7 +91,12 @@ class VDSSAgent:
         if source_filename:
             try:
                 code_query = any(term in user_message.casefold() for term in ("program", "code", "source", "function"))
-                chunks = retrieve(user_message, top_k=12 if code_query else 6, filename=source_filename)
+                chunks = retrieve(
+                    user_message,
+                    top_k=12 if code_query else 6,
+                    filename=source_filename,
+                    owner_id=current_user_id(),
+                )
             except Exception:
                 logger.exception("Selected-document retrieval failed for %s", source_filename)
                 return "I could not retrieve the selected document. Please try again."
@@ -222,7 +228,12 @@ class VDSSAgent:
 
     def _answer_from_selected_document(self, user_message: str, filename: str) -> str:
         try:
-            chunks = retrieve(user_message, top_k=5, filename=filename)
+            chunks = retrieve(
+                user_message,
+                top_k=5,
+                filename=filename,
+                owner_id=current_user_id(),
+            )
         except Exception:
             logger.exception("Selected-document retrieval failed for %s", filename)
             return "I could not retrieve the selected document. Please try again."
@@ -349,4 +360,3 @@ class VDSSAgent:
         if tool_name == "calculator":
             return f"I could not calculate that safely: {error}"
         return f"I could not complete that step safely: {error}"
-

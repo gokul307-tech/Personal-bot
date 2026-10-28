@@ -1,8 +1,6 @@
-from pathlib import Path
-
 import pandas as pd
 
-from app.config.settings import DATA_DIR
+from app.tools.file_access import resolve_user_document_path
 
 
 ALLOWED_EXTENSIONS = {
@@ -14,21 +12,17 @@ def analyze_csv(
     file_path: str,
 ) -> dict:
 
-    path = Path(file_path).resolve()
-
     try:
-        path.relative_to(DATA_DIR.resolve())
-    except ValueError:
-        return {
-            "success": False,
-            "error": "CSV access is restricted to the project data directory.",
-        }
-
-    if not path.exists():
-
+        path = resolve_user_document_path(file_path)
+    except FileNotFoundError:
         return {
             "success": False,
             "error": "CSV file does not exist.",
+        }
+    except (PermissionError, ValueError):
+        return {
+            "success": False,
+            "error": "CSV access is restricted to your documents.",
         }
 
     if path.suffix.lower() not in ALLOWED_EXTENSIONS:

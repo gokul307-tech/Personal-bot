@@ -4,6 +4,7 @@ from pathlib import Path
 from pypdf import PdfReader
 
 from app.config.settings import DATA_DIR
+from app.tools.file_access import resolve_user_document_path
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,19 @@ def read_pdf_pages(file_path: str) -> list[dict[str, str | int]]:
 
 
 def read_pdf(file_path: str) -> str:
+    path = resolve_user_document_path(file_path)
+    pages = read_pdf_pages(str(path))
+    result = "\n".join(
+        f"\n--- Page {page['page_number']} ---\n{page['text']}"
+        for page in pages
+    )
+    max_chars = 150_000
+    if len(result) > max_chars:
+        result = result[:max_chars] + "\n\n[PDF content truncated.]"
+    return result
+
+
+def read_pdf_from_data_dir(file_path: str) -> str:
     pages = read_pdf_pages(file_path)
     result = "\n".join(
         f"\n--- Page {page['page_number']} ---\n{page['text']}"

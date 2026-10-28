@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.database.crud import (
     create_calendar_event,
     get_calendar_events,
@@ -14,7 +15,6 @@ def create_event(
     start_time: str,
     end_time: str | None = None,
     description: str | None = None,
-    user_id: int | None = None,
 ) -> dict:
 
     try:
@@ -43,7 +43,7 @@ def create_event(
         start_time=parsed_start,
         end_time=parsed_end,
         description=description,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return {
@@ -61,12 +61,11 @@ def create_event(
 
 def list_events(
     db: Session,
-    user_id: int | None = None,
 ) -> list[dict]:
 
     events = get_calendar_events(
         db=db,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return [

@@ -2,17 +2,14 @@ from pathlib import Path
 import logging
 from uuid import uuid4
 
-from app.config.settings import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
-    documents_dir_for_user,
-)
 from app.api.auth_context import current_user_id
+from app.config.settings import CHUNK_OVERLAP, CHUNK_SIZE
 from app.rag.chunker import chunk_document_pages
 from app.rag.document_loader import load_document_pages
 from app.rag.retriever import retrieve
 from app.rag.vector_store import add_documents, delete_documents_by_filename, get_all_documents
 from app.tools.embeddings import create_embeddings
+from app.tools.file_access import resolve_user_document_path
 
 
 logger = logging.getLogger(__name__)
@@ -108,9 +105,12 @@ def ingest_document(
 def ingest_project_document(
     filename: str,
 ) -> dict:
-
-    path = documents_dir_for_user(current_user_id()) / filename
-
+    try:
+        path = resolve_user_document_path(filename)
+    except FileNotFoundError:
+        return {"success": False, "error": "Document does not exist."}
+    except (PermissionError, ValueError):
+        return {"success": False, "error": "Document access is restricted to your documents."}
     return ingest_document(str(path))
 
 
@@ -118,16 +118,12 @@ def search_knowledge(
     query: str,
     top_k: int = 5,
     filename: str | None = None,
-    owner_id: int | None = None,
 ) -> list[dict]:
-
-    owner_id = current_user_id() if owner_id is None else owner_id
-
     results = retrieve(
         query=query,
         top_k=top_k,
         filename=filename,
-        owner_id=owner_id,
+        owner_id=current_user_id(),
     )
 
     return [

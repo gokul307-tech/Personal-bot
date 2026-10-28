@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.database.crud import (
     create_study_plan,
     get_study_plans,
@@ -14,7 +15,6 @@ def create_plan(
     subject: str | None = None,
     description: str | None = None,
     scheduled_at: str | None = None,
-    user_id: int | None = None,
 ) -> dict:
 
     parsed_datetime = None
@@ -42,7 +42,7 @@ def create_plan(
         subject=subject,
         description=description,
         scheduled_at=parsed_datetime,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return {
@@ -61,12 +61,11 @@ def create_plan(
 
 def list_plans(
     db: Session,
-    user_id: int | None = None,
 ) -> list[dict]:
 
     plans = get_study_plans(
         db=db,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return [

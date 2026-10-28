@@ -39,6 +39,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @application.get("/api/health")
+    def health():
+        return {"status": "ok"}
+
     @application.middleware("http")
     async def disable_private_response_caching(request: Request, call_next):
         response = await call_next(request)

@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from app.agent.agent import VDSSAgent
 from app.agent.registry import ToolRegistry
+from app.api.auth_context import reset_current_user_id, set_current_user_id
 from app.main import app
 from app.rag import retriever, vector_store
 from app.rag.document_loader import load_document, load_document_pages
@@ -90,7 +91,7 @@ def test_selected_document_agent_uses_filtered_retrieval(monkeypatch):
 	calls = []
 	monkeypatch.setattr(
 		"app.agent.agent.retrieve",
-		lambda query, top_k, filename: calls.append((query, filename)) or [
+		lambda query, top_k, filename, owner_id: calls.append((query, filename, owner_id)) or [
 			{"text": "Deadlock is a condition where processes wait indefinitely.", "page_number": 2}
 		],
 	)
@@ -99,9 +100,73 @@ def test_selected_document_agent_uses_filtered_retrieval(monkeypatch):
 
 	response = agent.run("Explain deadlock", source_filename="os.pdf")
 
-	assert calls == [("Explain deadlock", "os.pdf")]
+	assert calls == [("Explain deadlock", "os.pdf", 1)]
 	assert "Deadlock is a condition" in response
 	assert "Page 2" in response
+
+
+@pytest.mark.parametrize("llm_available", [False, True])
+def test_selected_document_retrieval_is_scoped_to_authenticated_owner(
+	tmp_path,
+	monkeypatch,
+	llm_available,
+):
+	monkeypatch.setattr(vector_store, "STORE_FILE", tmp_path / "vectors.json")
+	monkeypatch.setattr(retriever, "create_embedding", lambda _query: [1.0, 0.0])
+	vector_store.add_documents([
+		{
+			"id": "owner-a",
+			"filename": "shared-name.pdf",
+			"text": "ownership_boundary_x9 material for owner A",
+			"embedding": [1.0, 0.0],
+			"owner_id": 17,
+			"page_number": 1,
+		},
+		{
+			"id": "owner-b",
+			"filename": "shared-name.pdf",
+			"text": "ownership_boundary_x9 PRIVATE_OWNER_B_MARKER",
+			"embedding": [1.0, 0.0],
+			"owner_id": 29,
+			"page_number": 1,
+		},
+	])
+	agent = VDSSAgent(ToolRegistry())
+	monkeypatch.setattr(agent, "_llm_available", lambda: llm_available)
+	monkeypatch.setattr(agent.planner, "plan", lambda _message: {"requires_tools": False})
+
+	captured = {}
+
+	class Response:
+		content = "Answer based on the selected document."
+		tool_calls = []
+
+	if llm_available:
+		monkeypatch.setattr(
+			"app.agent.agent.ask_llm",
+			lambda **kwargs: captured.update(kwargs) or Response(),
+		)
+
+	context_token = set_current_user_id(17)
+	try:
+		answer = agent.run(
+			"What is ownership_boundary_x9?",
+			source_filename="shared-name.pdf",
+		)
+	finally:
+		reset_current_user_id(context_token)
+
+	if llm_available:
+		evidence = next(
+			message["content"]
+			for message in captured["messages"]
+			if "Retrieved excerpts:" in message.get("content", "")
+		)
+	else:
+		evidence = answer
+
+	assert "material for owner A" in evidence
+	assert "PRIVATE_OWNER_B_MARKER" not in evidence
 
 
 def test_selected_document_llm_failure_returns_retrieved_evidence(monkeypatch):

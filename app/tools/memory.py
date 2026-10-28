@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.database.crud import (
     create_memory,
     get_memories,
@@ -11,7 +12,6 @@ def remember_information(
     content: str,
     memory_type: str = "general",
     importance: float = 1.0,
-    user_id: int | None = None,
 ) -> dict:
 
     if not content.strip():
@@ -26,7 +26,7 @@ def remember_information(
         content=content,
         memory_type=memory_type,
         importance=importance,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return {
@@ -42,13 +42,12 @@ def recall_information(
     db: Session,
     memory_type: str | None = None,
     query: str | None = None,
-    user_id: int | None = None,
 ) -> list[dict]:
 
     memories = get_memories(
         db=db,
         memory_type=memory_type,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     result = [

@@ -737,12 +737,73 @@ Configure authentication in `.env`:
 APP_ENV=development
 AUTH_SESSION_DAYS=30
 PUBLIC_ORIGIN=
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openrouter/free
+DATABASE_URL=sqlite:///./data/vdss.db
 ```
+
+`OPENROUTER_API_KEY` is required for live AI responses; obtain it from your
+OpenRouter account and keep the real value in an untracked `.env` file or your
+deployment's secret manager. `OPENROUTER_MODEL` is optional and defaults to
+`openrouter/free`. The default SQLite database, uploaded files, and vector index
+are stored under `data/`. Deployments using local storage must attach persistent
+storage for that directory and include it in backups.
 
 Set `APP_ENV=production` when deployed over HTTPS so the session cookie receives the
 `Secure` attribute. In production, set `PUBLIC_ORIGIN` to the exact public origin
 (for example, `https://sage.example.com`) so state-changing requests can be checked
 against it. `AUTH_SESSION_DAYS` accepts values from 1 to 365.
+
+### Starting SAGE
+
+For local development, keep using:
+
+```shell
+python run.py
+```
+
+With the default `APP_ENV=development`, this binds to `127.0.0.2:8000` and enables
+automatic reload. For production, configure `APP_ENV=production` and start with:
+
+```shell
+APP_ENV=production python run.py
+```
+
+The production runner binds to `0.0.0.0`, reads the hosting platform's `PORT`
+environment variable, defaults to port `8000` when it is not set, and disables
+automatic reload. Do not put secrets in the startup command; configure them through
+the platform's environment-variable or secret-management settings.
+
+### Render Free demo deployment
+
+Create a Render **Web Service** for this repository and use these commands:
+
+```shell
+# Build command
+pip install -r requirements.txt
+
+# Start command
+APP_ENV=production python run.py
+```
+
+Set these environment variables in Render:
+
+- `APP_ENV=production`
+- `PUBLIC_ORIGIN=https://<your-service>.onrender.com` (use the exact public origin)
+- `OPENROUTER_API_KEY` (needed for live AI responses)
+
+Render supplies `PORT` for the server; do not set a fixed port. `OPENROUTER_MODEL`,
+`AUTH_SESSION_DAYS`, and `DATABASE_URL` are optional. `DATABASE_URL` defaults to
+`sqlite:///./data/vdss.db`; do not assume that this database or any other local
+file survives a Render Free restart, spin-down, or redeploy. The app stores data in
+`data/vdss.db`, `data/documents/`, `data/uploads/chat-attachments/`,
+`data/uploads/note-attachments/`, and `data/vector_store/vectors.json`. This includes
+accounts, sessions, conversations, uploaded documents, chat attachments, Notes PDFs,
+and the RAG index. Use only disposable demo data; no external storage or migration
+is configured here.
+
+Set Render's health-check path to `/api/health`. It returns only `{"status":"ok"}`
+and checks liveness, not database or AI-provider readiness.
 
 On startup, database migration adds missing ownership columns and assigns existing
 unowned database rows to a non-loginable legacy owner (user ID 1). Existing vector

@@ -2,6 +2,7 @@ from pathlib import Path
 import logging
 
 from app.config.settings import DATA_DIR
+from app.tools.file_access import resolve_user_document_path
 
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,18 @@ ALLOWED_EXTENSIONS = {
 
 
 def read_file(file_path: str) -> str:
+    try:
+        path = resolve_user_document_path(file_path)
+    except FileNotFoundError:
+        return "Error: File does not exist."
+    except (PermissionError, ValueError):
+        return "Error: File access is restricted to your documents."
 
+    return read_file_from_data_dir(str(path))
+
+
+def read_file_from_data_dir(file_path: str) -> str:
     path = Path(file_path).resolve()
-
     try:
         path.relative_to(DATA_DIR.resolve())
     except ValueError:

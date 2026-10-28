@@ -4,14 +4,64 @@ document.documentElement.dataset.theme=state.theme;
 function toast(text){const node=$('toast');node.textContent=text;node.classList.add('show');setTimeout(()=>node.classList.remove('show'),2800)}
 function escapeHtml(value=''){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 async function copyToClipboard(text){if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return}catch{}}const field=document.createElement('textarea');field.value=text;field.setAttribute('readonly','');field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.select();const copied=document.execCommand('copy');field.remove();if(!copied)throw new Error('Clipboard copy failed')}
-function markdown(source=''){let safe=escapeHtml(source);const code=[];safe=safe.replace(/```(?:[\w+-]+)?\n?([\s\S]*?)```/g,(_,body)=>{const key=`@@CODE${code.length}@@`;code.push(`<pre><code>${body.trim()}</code></pre>`);return key});let html=safe.split(/\n\n+/).map(block=>{const lines=block.split('\n');if(/^#{1,3} /.test(lines[0])){const n=lines[0].match(/^#+/)[0].length;return `<h${n}>${lines[0].slice(n+1)}</h${n}>`}if(lines.every(line=>/^[-*] /.test(line))){return '<ul>'+lines.map(line=>`<li>${line.slice(2)}</li>`).join('')+'</ul>'}if(lines.every(line=>/^\d+\. /.test(line))){return '<ol>'+lines.map(line=>`<li>${line.replace(/^\d+\. /,'')}</li>`).join('')+'</ol>'}if(lines.every(line=>/^\|/.test(line))){const cells=lines.map(line=>line.split('|').slice(1,-1).map(cell=>cell.trim()));return `<table><tbody>${cells.filter(row=>!row.every(cell=>/^[-: ]+$/.test(cell))).map((row,i)=>`<tr>${row.map(cell=>`<${i?'td':'th'}>${cell}</${i?'td':'th'}>`).join('')}</tr>`).join('')}</tbody></table>`}if(lines[0].startsWith('&gt; '))return `<blockquote>${lines.map(line=>line.replace(/^&gt; /,'')).join('<br>')}</blockquote>`;return `<p>${lines.join('<br>')}</p>`}).join('').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');return html.replace(/@@CODE(\d+)@@/g,(_,i)=>code[Number(i)])}
+function markdown(source=''){
+  const fragments=[];
+  const blockFragments=new Set();
+  const nonce=Math.random().toString(36).slice(2);
+  const protect=(html,isBlock=false)=>{
+    const token=`\uE000${nonce}_${fragments.length}\uE001`;
+    fragments.push({token,html});
+    if(isBlock)blockFragments.add(token);
+    return token;
+  };
+  let safe=escapeHtml(source);
+  safe=safe.replace(/```(?:[\w+-]+)?\n?([\s\S]*?)```/g,(_,body)=>protect(`<pre><code>${body.trim()}</code></pre>`,true));
+  safe=safe.replace(/`([^`\n]+)`/g,(_,code)=>protect(`<code>${code}</code>`));
+  safe=safe.replace(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<!\\)\$(?!\$)[^$\n]+(?<!\\)\$(?!\$)/g,expression=>protect(`<span class="math-source">${expression}</span>`));
+  let html=safe.split(/\n{2,}/).map(block=>{
+    if(blockFragments.has(block))return block;
+    const lines=block.split('\n');
+    const heading=lines[0].match(/^(#{1,6})\s+(.+)$/);
+    if(heading)return `<h${heading[1].length}>${heading[2]}</h${heading[1].length}>`;
+    if(lines.every(line=>/^[-*] /.test(line)))return `<ul>${lines.map(line=>`<li>${line.slice(2)}</li>`).join('')}</ul>`;
+    if(lines.every(line=>/^\d+\. /.test(line)))return `<ol>${lines.map(line=>`<li>${line.replace(/^\d+\. /,'')}</li>`).join('')}</ol>`;
+    if(lines.length>1&&lines.every(line=>/^\|/.test(line))){
+      const rows=lines.map(line=>line.split('|').slice(1,-1).map(cell=>cell.trim()));
+      const hasHeader=rows.length>1&&rows[1].every(cell=>/^:?-{3,}:?$/.test(cell));
+      const header=hasHeader?`<thead><tr>${rows[0].map(cell=>`<th>${cell}</th>`).join('')}</tr></thead>`:'';
+      const bodyRows=rows.slice(hasHeader?2:0).filter(row=>!row.every(cell=>/^[-: ]+$/.test(cell)));
+      const body=`<tbody>${bodyRows.map(row=>`<tr>${row.map(cell=>`<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      return `<table>${header}${body}</table>`;
+    }
+    if(lines[0].startsWith('&gt; '))return `<blockquote>${lines.map(line=>line.replace(/^&gt; /,'')).join('<br>')}</blockquote>`;
+    return `<p>${lines.join('<br>')}</p>`;
+  }).join('')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  return fragments.reduce((result,fragment)=>result.split(fragment.token).join(fragment.html),html);
+}
+function renderMath(element){
+  if(typeof renderMathInElement!=='function')return;
+  renderMathInElement(element,{
+    delimiters:[
+      {left:'$$',right:'$$',display:true},
+      {left:'\\[',right:'\\]',display:true},
+      {left:'\\(',right:'\\)',display:false},
+      {left:'$',right:'$',display:false},
+    ],
+    throwOnError:false,
+    strict:'ignore',
+    trust:false,
+  });
+}
 function formatDate(value){const date=new Date(value);return Number.isNaN(date.getTime())?'':date.toLocaleDateString(undefined,{month:'short',day:'numeric'})}
 function createLoadingMessage(label='SAGE is thinking...'){const item=document.createElement('article');item.className='message assistant loading-message';item.innerHTML=`<div class="message-avatar"><img src="/assets/sage-logo.png" alt="SAGE"></div><div class="message-body typing">${escapeHtml(label)}</div>`;return item}
 function showCenteredLoader(visible){const loader=$('centered-loader');if(!loader)return;loader.hidden=!visible;loader.classList.toggle('is-visible',visible);loader.querySelector('img')?.classList.toggle('breathing-logo',visible);messages.setAttribute('aria-busy',String(visible))}
 function clearLoadingIndicators(){showCenteredLoader(false);messages.querySelectorAll('.loading-message').forEach(item=>item.remove())}
 function closeConversationDeleteModal(confirmed=false){const modal=$('conversation-delete-modal');if(modal)modal.hidden=true;const resolve=conversationDeleteResolve;conversationDeleteResolve=null;resolve?.(confirmed)}
 function requestConversationDelete(title, consequence='Its messages and attachments will be removed.'){const modal=$('conversation-delete-modal');if(!modal)return Promise.resolve(false);$('conversation-delete-copy').textContent=`Delete “${title}”? ${consequence} This cannot be undone.`;modal.hidden=false;$('conversation-delete-cancel').focus();return new Promise(resolve=>{conversationDeleteResolve=resolve})}
-function renderMessage(message){const role=message?.role==='assistant'?'assistant':'user';const content=typeof message?.content==='string'?message.content:'';const item=document.createElement('article');item.className=`message ${role}`;item.dataset.messageContent=content;const avatar=role==='assistant'?'<img src="/assets/sage-logo.png" alt="SAGE">':'You';const actions=role==='assistant'?'<div class="message-actions"><button data-copy-message aria-label="Copy response" title="Copy response">Copy</button><button data-regenerate aria-label="Regenerate response" title="Ask SAGE to answer again">Regenerate</button></div>':'';item.innerHTML=`<div class="message-avatar">${avatar}</div><div class="message-body">${role==='assistant'?markdown(content):escapeHtml(content).replace(/\n/g,'<br>')}<span class="message-time">${new Date(message?.created_at||Date.now()).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>${actions}</div>`;messages.appendChild(item);const copy=item.querySelector('[data-copy-message]');if(copy)copy.onclick=async()=>{copy.disabled=true;try{await copyToClipboard(content);copy.textContent='Copied';toast('Response copied.');setTimeout(()=>{copy.textContent='Copy';copy.disabled=false},1200)}catch{copy.disabled=false;toast('Could not copy the response. Select its text and copy it manually.')}};const regenerate=item.querySelector('[data-regenerate]');if(regenerate)regenerate.onclick=async()=>{const last=[...messages.querySelectorAll('.message.user')].at(-1)?.dataset.messageContent?.trim();if(!last||state.loading)return;regenerate.disabled=true;try{await sendMessage(last)}finally{regenerate.disabled=false}}}
+function renderMessage(message){const role=message?.role==='assistant'?'assistant':'user';const content=typeof message?.content==='string'?message.content:'';const item=document.createElement('article');item.className=`message ${role}`;item.dataset.messageContent=content;const avatar=role==='assistant'?'<img src="/assets/sage-logo.png" alt="SAGE">':'You';const actions=role==='assistant'?'<div class="message-actions"><button data-copy-message aria-label="Copy response" title="Copy response">Copy</button><button data-regenerate aria-label="Regenerate response" title="Ask SAGE to answer again">Regenerate</button></div>':'';item.innerHTML=`<div class="message-avatar">${avatar}</div><div class="message-body">${role==='assistant'?markdown(content):escapeHtml(content).replace(/\n/g,'<br>')}<span class="message-time">${new Date(message?.created_at||Date.now()).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>${actions}</div>`;messages.appendChild(item);if(role==='assistant')renderMath(item.querySelector('.message-body'));const copy=item.querySelector('[data-copy-message]');if(copy)copy.onclick=async()=>{copy.disabled=true;try{await copyToClipboard(content);copy.textContent='Copied';toast('Response copied.');setTimeout(()=>{copy.textContent='Copy';copy.disabled=false},1200)}catch{copy.disabled=false;toast('Could not copy the response. Select its text and copy it manually.')}};const regenerate=item.querySelector('[data-regenerate]');if(regenerate)regenerate.onclick=async()=>{const last=[...messages.querySelectorAll('.message.user')].at(-1)?.dataset.messageContent?.trim();if(!last||state.loading)return;regenerate.disabled=true;try{await sendMessage(last)}finally{regenerate.disabled=false}}}
 function setNewChatTemplate(template){const validTemplates=['general','study','coding','document'];if(state.activeId||!validTemplates.includes(template))return;state.conversationTemplate=template;document.querySelectorAll('[data-chat-template]').forEach(button=>{const selected=button.dataset.chatTemplate===template;button.classList.toggle('is-selected',selected);button.setAttribute('aria-pressed',String(selected))})}
 function setNewChatMode(enabled){const chat=$('view-chat');const gallery=$('new-chat-template-gallery');chat.classList.toggle('new-conversation',enabled);if(gallery)gallery.hidden=!enabled;if(enabled)setNewChatTemplate(state.conversationTemplate||'general')}
 function showWelcome(){messages.innerHTML='';$('welcome').hidden=false;state.conversationTemplate='general';setNewChatMode(true)}function showMessages(list){$('welcome').hidden=list.length>0;messages.innerHTML='';list.forEach(renderMessage);messages.scrollTop=messages.scrollHeight;setNewChatMode(false)}

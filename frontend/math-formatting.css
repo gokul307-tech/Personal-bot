@@ -1,0 +1,22 @@
+.message-body p{margin:0 0 12px}
+.message-body p:last-child{margin-bottom:0}
+.message-body h1,.message-body h2,.message-body h3,.message-body h4,.message-body h5,.message-body h6{margin:20px 0 9px;color:var(--ink)}
+.message-body h1{font-size:23px}
+.message-body h2{font-size:19px}
+.message-body h3{font-size:16px}
+.message-body h4,.message-body h5,.message-body h6{font-size:14px}
+.message-body ul,.message-body ol{margin:8px 0 14px}
+.message-body li+li{margin-top:4px}
+.message-body table{display:block;width:max-content;max-width:100%;margin:12px 0 16px;overflow-x:auto;border-collapse:collapse;font-size:13px}
+.message-body th,.message-body td{padding:7px 10px;border:1px solid var(--line);text-align:left;vertical-align:top}
+.message-body th{background:rgba(89,133,86,.12);font-weight:700}
+.message-body blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid var(--green);color:var(--muted)}
+.message-body .katex{font-size:1.04em}
+.message-body .katex-display{max-width:100%;margin:14px 0;overflow-x:auto;overflow-y:hidden;padding:5px 0 8px;text-align:left}
+.message-body pre{max-width:100%;overflow-x:auto}
+.message-body pre code{white-space:pre}
+@media(max-width:760px){
+  .message-body table{font-size:12px}
+  .message-body th,.message-body td{padding:6px 8px}
+  .message-body .katex-display{margin:10px 0}
+}

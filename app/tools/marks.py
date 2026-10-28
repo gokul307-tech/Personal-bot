@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.database.crud import (
     create_mark,
     get_marks,
@@ -12,7 +13,6 @@ def add_mark(
     marks_obtained: float,
     maximum_marks: float,
     exam_name: str | None = None,
-    user_id: int | None = None,
 ) -> dict:
 
     if maximum_marks <= 0:
@@ -39,7 +39,7 @@ def add_mark(
         marks_obtained=marks_obtained,
         maximum_marks=maximum_marks,
         exam_name=exam_name,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     percentage = (
@@ -60,13 +60,12 @@ def add_mark(
 def list_marks(
     db: Session,
     subject: str | None = None,
-    user_id: int | None = None,
 ) -> list[dict]:
 
     marks = get_marks(
         db=db,
         subject=subject,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return [

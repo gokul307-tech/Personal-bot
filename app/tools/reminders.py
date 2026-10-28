@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.database.crud import (
     create_reminder,
     get_reminders,
@@ -13,7 +14,6 @@ def create_reminder_tool(
     title: str,
     remind_at: str,
     description: str | None = None,
-    user_id: int | None = None,
 ) -> dict:
 
     try:
@@ -38,7 +38,7 @@ def create_reminder_tool(
         title=title,
         remind_at=parsed_time,
         description=description,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return {
@@ -51,12 +51,11 @@ def create_reminder_tool(
 
 def list_reminders(
     db: Session,
-    user_id: int | None = None,
 ) -> list[dict]:
 
     reminders = get_reminders(
         db=db,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return [
