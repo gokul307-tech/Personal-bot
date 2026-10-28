@@ -2,8 +2,8 @@ from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 from xml.etree import ElementTree
 
-from app.tools.file_reader import read_file
-from app.tools.pdf_reader import read_pdf, read_pdf_pages
+from app.tools.file_reader import read_file_from_data_dir
+from app.tools.pdf_reader import read_pdf_from_data_dir, read_pdf_pages
 
 
 SUPPORTED_TEXT_EXTENSIONS = {
@@ -25,7 +25,7 @@ def load_document(file_path: str) -> str:
         raise FileNotFoundError(f"Document not found: {path}")
 
     if path.suffix.lower() == ".pdf":
-        return read_pdf(str(path))
+        return read_pdf_from_data_dir(str(path))
 
     if path.suffix.lower() == ".docx":
         try:
@@ -42,7 +42,7 @@ def load_document(file_path: str) -> str:
         return "\n".join(paragraphs)
 
     if path.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS:
-        return read_file(str(path))
+        return read_file_from_data_dir(str(path))
 
     raise ValueError(
         f"Unsupported document type: {path.suffix}"
