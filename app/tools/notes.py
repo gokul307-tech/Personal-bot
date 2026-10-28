@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.api.auth_context import current_user_id
 from app.database.crud import (
     create_note,
     get_notes,
@@ -11,7 +12,6 @@ def add_note(
     title: str,
     content: str,
     subject: str | None = None,
-    user_id: int | None = None,
 ) -> dict:
 
     note = create_note(
@@ -19,7 +19,7 @@ def add_note(
         title=title,
         content=content,
         subject=subject,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return {
@@ -34,13 +34,12 @@ def add_note(
 def list_notes(
     db: Session,
     subject: str | None = None,
-    user_id: int | None = None,
 ) -> list[dict]:
 
     notes = get_notes(
         db=db,
         subject=subject,
-        user_id=user_id,
+        user_id=current_user_id(),
     )
 
     return [
