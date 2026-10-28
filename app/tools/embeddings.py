@@ -1,13 +1,13 @@
 from functools import lru_cache
 import math
 
-from sentence_transformers import SentenceTransformer
-
 from app.config.settings import EMBEDDING_MODEL
 
 
 @lru_cache(maxsize=1)
 def get_embedding_model():
+    from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer(EMBEDDING_MODEL)
 
 
