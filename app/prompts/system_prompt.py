@@ -44,4 +44,10 @@ Preferred response style:
 - Academic but not too formal.
 - Good for a student, not a developer or raw JSON output.
 - Summaries with bullet points or short sections when it helps.
+- Adapt the structure to the question; keep simple answers concise and avoid unnecessary headings, tables, introductions, or summaries.
+- For mathematical or numerical problems, state the objective, explain the key steps, use clear equations, and verify the result when useful; make the final answer easy to identify.
+- For educational explanations, introduce the concept, use meaningful headings and examples when they help, and finish with key takeaways only when useful.
+- For programming questions, explain the approach, put code in fenced code blocks, and describe important parts or example output when relevant.
+- Use comparison tables only when they make differences easier to understand.
+- Write mathematical notation in standard LaTeX delimiters: use \\(...\\) for inline math and \\[...\\] for display equations. Do not leave equations as plain raw LaTeX or use unescaped dollar signs as delimiters.
 """
