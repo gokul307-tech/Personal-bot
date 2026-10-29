@@ -1,8 +1,12 @@
+import logging
 import math
 import re
 
 from app.rag.vector_store import search
 from app.tools.embeddings import create_embedding
+
+
+logger = logging.getLogger(__name__)
 
 
 def retrieve(
@@ -37,7 +41,11 @@ def retrieve(
     if retrieval_query:
         try:
             query_embedding = create_embedding(retrieval_query)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "rag_embedding_fallback exception_type=%s",
+                type(exc).__name__,
+            )
             query_embedding = []
 
     results = search(

@@ -3,6 +3,7 @@ import json
 import logging
 import mimetypes
 from pathlib import Path
+import time
 from uuid import uuid4
 import shutil
 
@@ -31,6 +32,7 @@ from app.config.settings import APP_NAME, DOCUMENTS_DIR, UPLOADS_DIR
 from app.database import crud
 from app.database.database import get_db
 from app.database.models import Note, StudyPlan
+from app.llm.model_config import CHAT_REQUEST_DEADLINE_SECONDS
 from app.tools.pdf_reader import read_pdf_pages
 from app.tools.rag import ingest_document
 from app.rag.vector_store import add_documents, delete_documents_by_filename, get_all_documents
@@ -124,6 +126,9 @@ def _delete_conversation_attachments(conversation_id: int, db) -> None:
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
+    started_at = time.perf_counter()
+    deadline = time.monotonic() + CHAT_REQUEST_DEADLINE_SECONDS
+    outcome = "failed"
     db = next(get_db())
     try:
         conversation = (
@@ -160,6 +165,7 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
                 source_filename=request.source_filename,
                 preferences=request.preferences.model_dump(),
                 conversation_template=conversation.template,
+                deadline=deadline,
             )
         except HTTPException:
             raise
@@ -178,9 +184,15 @@ def chat(request: ChatRequest, agent: VDSSAgent = Depends(get_agent)):
         if request.auto_title and conversation.title == "New Chat":
             conversation.title = request.message.strip().splitlines()[0][:60]
             db.commit()
+        outcome = "success"
         return {"response": response, "conversation_id": conversation.id}
     finally:
         db.close()
+        logger.info(
+            "chat_request_finished endpoint=chat duration_ms=%.1f outcome=%s",
+            (time.perf_counter() - started_at) * 1000,
+            outcome,
+        )
 
 
 @router.post("/chat/attachments", response_model=ChatResponse)
@@ -193,6 +205,9 @@ async def chat_with_attachment(
     auto_title: bool = Form(default=True),
     agent: VDSSAgent = Depends(get_agent),
 ):
+    started_at = time.perf_counter()
+    deadline = time.monotonic() + CHAT_REQUEST_DEADLINE_SECONDS
+    outcome = "failed"
     try:
         chat_preferences = ChatPreferences.model_validate_json(preferences)
     except ValidationError as exc:
@@ -256,6 +271,7 @@ async def chat_with_attachment(
                 source_filename=source_filename,
                 preferences=chat_preferences.model_dump(),
                 conversation_template=conversation.template,
+                deadline=deadline,
             )
         except HTTPException:
             raise
@@ -274,6 +290,7 @@ async def chat_with_attachment(
         if auto_title and conversation.title == "New Chat":
             conversation.title = message.strip().splitlines()[0][:60]
             db.commit()
+        outcome = "success"
         return {"response": response, "conversation_id": conversation.id}
     except Exception:
         if source_filename and not message_saved:
@@ -283,6 +300,11 @@ async def chat_with_attachment(
         raise
     finally:
         db.close()
+        logger.info(
+            "chat_request_finished endpoint=chat_attachment duration_ms=%.1f outcome=%s",
+            (time.perf_counter() - started_at) * 1000,
+            outcome,
+        )
 
 
 @router.get("/conversations")

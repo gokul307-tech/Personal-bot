@@ -1,7 +1,9 @@
 import json
 import logging
+import time
 from typing import Any
 
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from sqlalchemy.orm import Session
 
 from app.api.auth_context import current_user_id
@@ -9,6 +11,7 @@ from app.agent.executor import ToolExecutor
 from app.agent.planner import AgentPlanner
 from app.agent.registry import ToolRegistry
 from app.llm.client import ask_llm
+from app.llm.model_config import CHAT_REQUEST_DEADLINE_SECONDS
 from app.memory.memory_manager import MemoryManager
 from app.prompts.system_prompt import SYSTEM_PROMPT
 from app.rag.retriever import retrieve
@@ -39,7 +42,11 @@ class VDSSAgent:
         source_filename: str | None = None,
         preferences: dict[str, Any] | None = None,
         conversation_template: str = "general",
+        deadline: float | None = None,
     ) -> str:
+
+        if deadline is None:
+            deadline = time.monotonic() + CHAT_REQUEST_DEADLINE_SECONDS
 
         plan = None if source_filename else self.planner.fast_path(user_message)
         plan = plan or self.planner.plan(user_message)
@@ -127,20 +134,88 @@ class VDSSAgent:
         recent_context = (conversation_messages or self.memory.get_conversation())[-8:]
         messages.extend(recent_context)
 
-        for _ in range(self.max_tool_iterations):
+        for iteration in range(self.max_tool_iterations):
+            model_round = iteration + 1
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "chat_deadline_exceeded stage=model round=%d",
+                    model_round,
+                )
+                if source_filename:
+                    return self._format_document_excerpts(source_filename, chunks)
+                return "SAGE could not complete that request within the time limit. Please try again."
+
+            model_started = time.perf_counter()
             try:
                 tools = self.registry.openai_tools() if plan.get("requires_tools") and not source_filename else None
-                response = ask_llm(messages=messages, tools=tools)
-            except TimeoutError:
-                logger.warning("OpenRouter timed out while handling %s", user_message[:120])
+                response = ask_llm(messages=messages, tools=tools, timeout=remaining)
+            except APITimeoutError as exc:
+                logger.warning(
+                    "chat_model_call_finished round=%d duration_ms=%.1f outcome=timeout exception_type=%s",
+                    model_round,
+                    (time.perf_counter() - model_started) * 1000,
+                    type(exc).__name__,
+                )
                 if source_filename:
                     return self._format_document_excerpts(source_filename, chunks)
+                if time.monotonic() >= deadline:
+                    return "SAGE could not complete that request within the time limit. Please try again."
                 return self._run_without_llm(user_message, db)
-            except Exception:
-                logger.exception("Language-model request failed")
+            except TimeoutError as exc:
+                logger.warning(
+                    "chat_model_call_finished round=%d duration_ms=%.1f outcome=timeout exception_type=%s",
+                    model_round,
+                    (time.perf_counter() - model_started) * 1000,
+                    type(exc).__name__,
+                )
                 if source_filename:
                     return self._format_document_excerpts(source_filename, chunks)
+                if time.monotonic() >= deadline:
+                    return "SAGE could not complete that request within the time limit. Please try again."
                 return self._run_without_llm(user_message, db)
+            except APIConnectionError as exc:
+                logger.warning(
+                    "chat_model_call_finished round=%d duration_ms=%.1f outcome=connection_error exception_type=%s",
+                    model_round,
+                    (time.perf_counter() - model_started) * 1000,
+                    type(exc).__name__,
+                )
+                if source_filename:
+                    return self._format_document_excerpts(source_filename, chunks)
+                if time.monotonic() >= deadline:
+                    return "SAGE could not complete that request within the time limit. Please try again."
+                return self._run_without_llm(user_message, db)
+            except APIStatusError as exc:
+                logger.warning(
+                    "chat_model_call_finished round=%d duration_ms=%.1f outcome=provider_error status_code=%d",
+                    model_round,
+                    (time.perf_counter() - model_started) * 1000,
+                    exc.status_code,
+                )
+                if source_filename:
+                    return self._format_document_excerpts(source_filename, chunks)
+                if time.monotonic() >= deadline:
+                    return "SAGE could not complete that request within the time limit. Please try again."
+                return self._run_without_llm(user_message, db)
+            except Exception as exc:
+                logger.warning(
+                    "chat_model_call_finished round=%d duration_ms=%.1f outcome=unexpected_error exception_type=%s",
+                    model_round,
+                    (time.perf_counter() - model_started) * 1000,
+                    type(exc).__name__,
+                )
+                if source_filename:
+                    return self._format_document_excerpts(source_filename, chunks)
+                if time.monotonic() >= deadline:
+                    return "SAGE could not complete that request within the time limit. Please try again."
+                return self._run_without_llm(user_message, db)
+
+            logger.info(
+                "chat_model_call_finished round=%d duration_ms=%.1f outcome=success",
+                model_round,
+                (time.perf_counter() - model_started) * 1000,
+            )
 
             if response is None:
                 if source_filename:
@@ -191,7 +266,28 @@ class VDSSAgent:
                 if db is not None:
                     arguments = self._inject_database(tool_name, arguments, db)
 
+                if time.monotonic() >= deadline:
+                    logger.warning(
+                        "chat_deadline_exceeded stage=tool round=%d tool=%s",
+                        model_round,
+                        tool_name,
+                    )
+                    return "SAGE could not complete that request within the time limit. Please try again."
+
+                tool_started = time.perf_counter()
                 result = self.executor.execute(tool_name, arguments)
+                tool_duration_ms = (time.perf_counter() - tool_started) * 1000
+                tool_outcome = (
+                    "failure"
+                    if isinstance(result, dict) and result.get("success") is False
+                    else "success"
+                )
+                logger.info(
+                    "chat_tool_finished tool=%s duration_ms=%.1f outcome=%s",
+                    tool_name,
+                    tool_duration_ms,
+                    tool_outcome,
+                )
                 try:
                     result_content = json.dumps(result, ensure_ascii=False, default=str)
                 except TypeError:
@@ -202,6 +298,14 @@ class VDSSAgent:
                     "tool_call_id": getattr(tool_call, "id", "call"),
                     "content": result_content,
                 })
+
+                if time.monotonic() >= deadline:
+                    logger.warning(
+                        "chat_deadline_exceeded stage=tool round=%d tool=%s",
+                        model_round,
+                        tool_name,
+                    )
+                    return "SAGE could not complete that request within the time limit. Please try again."
 
         if source_filename:
             return self._format_document_excerpts(source_filename, chunks)

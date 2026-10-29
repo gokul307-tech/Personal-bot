@@ -1,14 +1,25 @@
 from functools import lru_cache
+import logging
 import math
 
 from app.config.settings import EMBEDDING_MODEL
 
 
+logger = logging.getLogger(__name__)
+
+
 @lru_cache(maxsize=1)
 def get_embedding_model():
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
 
-    return SentenceTransformer(EMBEDDING_MODEL)
+        return SentenceTransformer(EMBEDDING_MODEL)
+    except Exception as exc:
+        logger.warning(
+            "embedding_model_initialization_failed exception_type=%s",
+            type(exc).__name__,
+        )
+        raise
 
 
 def create_embeddings(
