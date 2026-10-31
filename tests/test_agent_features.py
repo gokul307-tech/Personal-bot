@@ -97,6 +97,41 @@ def test_agent_enforces_deadline_between_sequential_tool_rounds(monkeypatch, cap
     assert "private deadline-test message" not in caplog.text
 
 
+def test_agent_passes_remaining_deadline_to_each_model_round(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(agent_module.time, "monotonic", lambda: clock[0])
+
+    registry = ToolRegistry()
+
+    def run_tool():
+        clock[0] += 3.0
+        return {"success": True}
+
+    registry.register("step_tool", "Test tool", {"type": "object"}, run_tool)
+    agent = VDSSAgent(registry)
+    monkeypatch.setattr(agent, "_llm_available", lambda: True)
+    monkeypatch.setattr(agent.planner, "fast_path", lambda _message: None)
+    monkeypatch.setattr(agent.planner, "plan", lambda _message: {"requires_tools": True})
+
+    call_timeouts = []
+
+    def request_tool(**kwargs):
+        call_timeouts.append(kwargs["timeout"])
+        clock[0] += 2.0
+        if len(call_timeouts) == 1:
+            tool_call = SimpleNamespace(
+                id="call-1",
+                function=SimpleNamespace(name="step_tool", arguments="{}"),
+            )
+            return SimpleNamespace(content="", tool_calls=[tool_call])
+        return SimpleNamespace(content="Completed both steps.", tool_calls=[])
+
+    monkeypatch.setattr("app.agent.agent.ask_llm", request_tool)
+
+    assert agent.run("Complete a two-step request.", deadline=10.0) == "Completed both steps."
+    assert call_timeouts == [10.0, 5.0]
+
+
 def test_agent_handles_sdk_timeout_explicitly_without_logging_chat_content(monkeypatch, caplog):
     agent = VDSSAgent(create_default_registry())
     monkeypatch.setattr(agent, "_llm_available", lambda: True)
